@@ -53,8 +53,38 @@ class CQCodeParser:
         except Exception as e:
             print(f"获取用户信息失败: {e}")
         return None
+    async def get_group_member_info(self, group_id: str, user_id: str) -> Optional[Dict]:
+        """获取群成员信息"""
+        try:
+            uid = int(user_id) if user_id.isdigit() else user_id
+            gid = int(group_id) if group_id.isdigit() else group_id
+            response = await self.send_request(
+                "get_group_member_info",
+                {"group_id": gid, "user_id": uid, "no_cache": False},
+                f"get_group_member_{group_id}_{user_id}"
+            )
+            if response and response.get("retcode") == 0:
+                return response.get("data")
+        except Exception as e:
+            print(f"获取群成员信息失败: {e}")
+        return None
+    async def get_user_nickname(self, user_id: str, group_id: str = None) -> str:
+        """获取用户昵称，如果提供群号则优先使用群名片"""
+        # 如果提供了群号，尝试从群成员缓存中获取
+        if group_id:
+            cache_key = f"{group_id}_{user_id}"
+            if cache_key in self.nickname_cache:
+                return self.nickname_cache[cache_key]
+            # 获取群成员信息
+            member_info = await self.get_group_member_info(group_id, user_id)
+            if member_info:
+                # 优先使用群名片 (card)，如果没有则使用昵称 (nickname)
+                nickname = member_info.get("card") or member_info.get("nickname") or f"用户{user_id}"
+                self.nickname_cache[cache_key] = nickname
+                return nickname
+            # 如果获取失败，回退到个人昵称（继续执行下面的逻辑）
 
-    async def get_user_nickname(self, user_id: str) -> str:
+        # 原逻辑：获取个人昵称
         if user_id in self.nickname_cache:
             return self.nickname_cache[user_id]
         if user_id.lower() == "all":
@@ -66,7 +96,8 @@ class CQCodeParser:
             return nickname
         return f"用户{user_id}"
 
-    async def parse_at_cq_codes(self, text: str) -> str:
+    async def parse_at_cq_codes(self, text: str, group_id: str = None) -> str:
+        """解析 @ CQ 码，将 QQ 号替换为昵称，可指定群号以使用群名片"""
         if not text:
             return text
         pattern = r'\[CQ:at,qq=(\d+|all)[^\]]*\]'
@@ -77,12 +108,14 @@ class CQCodeParser:
         for match in reversed(matches):
             cq_code = match.group(0)
             qq = match.group(1)
-            nickname = await self.get_user_nickname(qq)
+            nickname = await self.get_user_nickname(qq, group_id)
             result = result[:match.start()] + f"@{nickname}" + result[match.end():]
         return result
 
-    async def parse_all_cq_codes(self, text: str) -> str:
-        text = await self.parse_at_cq_codes(text)
+
+    async def parse_all_cq_codes(self, text: str, group_id: str = None) -> str:
+        """解析所有 CQ 码，可指定群号用于 @ 解析"""
+        text = await self.parse_at_cq_codes(text, group_id)
         text = re.sub(r'\[CQ:image[^\]]*\]', '[图片]', text)
         text = re.sub(r'\[CQ:face[^\]]*\]', '[表情]', text)
         text = re.sub(r'\[CQ:record[^\]]*\]', '[语音]', text)
