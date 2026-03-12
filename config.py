@@ -12,7 +12,7 @@ MESSAGE_TRUNCATE_SUFFIX = "...（长消息）"
 
 # ================= 日记触发配置 =================
 DIARY_IDLE_SECONDS = 120          # 空闲触发时间（秒），2分钟
-DIARY_MIN_TURNS = 20               # 最小对话轮数（非系统消息条数）
+DIARY_MIN_TURNS = 10               # 最小对话轮数（非系统消息条数）
 DIARY_MAX_LENGTH = 100             # 保底历史长度阈值（超过则强制写日记）
 
 # ================= RAG 记忆配置 =================
@@ -21,7 +21,7 @@ VECTOR_DB_PATH = "./yuki_memory"          # 向量数据库路径
 EMBED_MODEL = "./models/text2vec-base-chinese"  # 本地模型路径
 RETRIEVAL_TOP_K = 20                        # 每次检索返回日记条数
 KEEP_LAST_DIALOGUE = 5                     # 保留最近对话条数（短期记忆）
-DIARY_THRESHOLD = 0.25                   # 日记相关性阈值（越低越严格）
+DIARY_THRESHOLD = 0.28                   # 日记相关性阈值（越低越严格）
 # ================= API配置 =================
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 # DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
@@ -43,7 +43,7 @@ NAPCAT_WS_URL = "ws://127.0.0.1:3001"
 # ================= 目标配置 =================
 TARGET_QQ = 2962538973
 # TARGET_GROUP = 1034986009
-TARGET_GROUPS = [1057020972, 1034986009, 1085409165, 742134223]   # 示例
+TARGET_GROUPS = [1057020972, 1085409165, 818038143, 1034986009]   # 示例
 # TARGET_GROUPS = [1085409165]
 # TARGET_GROUP = 1057020972
 # TARGET_GROUP = 1085409165 #测试群
@@ -57,15 +57,14 @@ CACHE_DIR = "meme_cache"
 CACHE_FILE = "meme_cache.json"
 
 # ================= 时间配置 =================
-DEBOUNCE_TIME = 18
-
+DEBOUNCE_TIME = 12
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=60, connect=10, sock_read=30)
 
 # ================= 精力值配置 =================
 INITIAL_ENERGY = 100
 MAX_ENERGY = 100.0
 RECOVERY_PER_MIN = 0.8
-COST_PER_REPLY = 4
+COST_PER_REPLY = 2
 MIN_ACTIVE_ENERGY = 13.0
 
 # ================= 并发配置 =================

@@ -101,12 +101,11 @@ async def should_i_reply(history, current_text):
         print(f"[ERROR] 判定失败原因: {e}")
         return False
 
-async def clean_cq_code(text: str, group_id: str = None) -> str:
+async def clean_cq_code(text):
     """
     清理CQ码，解析@为用户名，并对动画表情进行AI理解
-    可传入群号 group_id 以在解析 @ 时使用群名片
+    返回处理后的文本
     """
-    print(f"[System] 解析CQ码中")
     modified_text, image_urls = meme_processor.extract_urls_from_text(text)
 
     if image_urls:
@@ -121,8 +120,7 @@ async def clean_cq_code(text: str, group_id: str = None) -> str:
     else:
         final_text = text
 
-    # 传入 group_id 以解析 @ 时使用群名片
-    parsed_text = await message_processor.parse_all_cq_codes(final_text, group_id)
+    parsed_text = await message_processor.parse_all_cq_codes(final_text)
     return parsed_text
 
 async def process_messages(chat_id, websocket, mode):
@@ -132,9 +130,8 @@ async def process_messages(chat_id, websocket, mode):
 
     raw_combined_text = "\n".join(messages)
     print(f"[{chat_id}] 收到消息 (原始): {raw_combined_text}")
-    # 如果是群聊模式，传入 chat_id 作为群号
-    group_id = chat_id if mode == "group" else None
-    combined_text = await clean_cq_code(raw_combined_text, group_id)
+    combined_text = await clean_cq_code(raw_combined_text)
+
     print(f"[{chat_id}] 收到消息 (处理后) {combined_text}")
     yuki.message_buffer[chat_id] = []
     if chat_id in yuki.buffer_tasks: del yuki.buffer_tasks[chat_id]
@@ -148,7 +145,6 @@ async def process_messages(chat_id, websocket, mode):
         history_dict[cid] = [{"role": "system", "content": yuki.get_setting(mode)}]
 
     history_dict[cid].append({"role": "user", "content": combined_text})
-    yuki.last_message_time[cid] = time.time()  # 新增
     history_manager.save(history_dict)
 
     if mode == "group":
