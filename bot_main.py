@@ -285,7 +285,7 @@ async def idle_diary_checker():
                 continue
             non_system_msgs = [msg for msg in history_dict[cid] if msg["role"] != "system"]
             non_system_count = len(non_system_msgs)
-            if non_system_count < DIARY_MIN_TURNS and idle_seconds < DIARY_IDLE_SECONDS * 1.5:  # 如果轮数不足但空闲时间已经是阈值的两倍，不输出
+            if non_system_count < DIARY_MIN_TURNS :  # 如果轮数不足但空闲时间已经是阈值的两倍，不输出
                 print(
                     f"[System] 群 {cid} 空闲 {idle_seconds:.1f} 秒，但对话轮数仅 {non_system_count}，继续观察..."
                     f"({datetime.datetime.now().strftime('%H:%M:%S')})"
