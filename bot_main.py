@@ -57,12 +57,13 @@ async def summarize_memory(chat_id, history):
 
         diary_content = response.choices[0].message.content
         diary_content = re.sub(r'\s*FINISHED\s*$', '', diary_content, flags=re.IGNORECASE)
+        diary_content = f"【日记({time_str})】：\n{diary_content}"
         memory_rag.save_diary(diary_content, chat_id=chat_id)
         print(f"[System] 日记已存入记忆库：{diary_content}")
         
         new_history_json = (
             [msg for msg in history if msg["role"] == "system"] +
-            [{"role": "system", "content": f"【日记({time_str})】：\n{diary_content}"}] +
+            [{"role": "system", "content": f"{diary_content}"}] +
             dialogue_msgs[-KEEP_LAST_DIALOGUE:]
         )
         return new_history_json
