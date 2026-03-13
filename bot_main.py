@@ -210,8 +210,9 @@ async def process_messages(chat_id, websocket, mode):
         )
         print(f"[System] 检索到 {len(relevant_diaries)} 条相关日记:")
         for i, diary in enumerate(relevant_diaries, 1):
-            preview = diary[:100] + "..." if len(diary) > 100 else diary
-            print(f"  回忆 {i}: {preview}")
+            preview = diary[:50] + "..." if len(diary) > 100 else diary
+            preview = preview.replace('\n', ' ')
+            print(f"[Diary Debug]回忆 {i}: {preview}")
         # ----------------------- 构建API消息列表 ----------------------------
         #
         # 1. 基础人设（取历史第一个系统消息）
