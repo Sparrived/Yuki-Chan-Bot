@@ -213,7 +213,7 @@ async def process_messages(chat_id, websocket, mode):
             threshold = DIARY_THRESHOLD
         )
         print(f"[System] 检索到 {len(relevant_diaries)} 条相关日记:")
-        for i, diary in enumerate(relevant_diaries, 1):
+        for i, diary in enumerate(reversed(relevant_diaries), 1): # 从最旧的相关日记开始打印预览
             preview = diary[:50] + "..." if len(diary) > 100 else diary
             preview = preview.replace('\n', ' ')
             print(f"[Diary Debug]回忆 {i}: {preview}")
@@ -225,7 +225,7 @@ async def process_messages(chat_id, websocket, mode):
         combined_API_message = [{"role": "system", "content": system_prompt}]
 
         # 2. 插入检索到的日记作为系统消息
-        for diary in relevant_diaries:
+        for diary in reversed(relevant_diaries):  # 从最旧的相关日记开始插入，保持时间顺序
             combined_API_message.append({"role": "system", "content": f"【回忆】{diary}"})
 
         # 3. 加入最近KEEP_LAST_DIALOGUE条对话（不包括系统消息）
