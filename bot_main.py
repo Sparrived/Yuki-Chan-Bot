@@ -6,6 +6,7 @@ import websockets
 import datetime
 import time
 import re
+import os
 
 # 导入核心模块和工具类
 from yuki_core import YukiState, HistoryManager, BASE_SETTING
@@ -327,11 +328,11 @@ async def main_logic(mode):
                     if not TARGET_GROUPS or group_id in TARGET_GROUPS: # 如果 TARGET_GROUPS 为空列表，则接收所有群；否则只接收列表中的群
                         sender = data.get("sender", {})
                         sender_name = sender.get("card") or sender.get("nickname") or "未知路人"
-                        await manage_buffer(group_id, f"【“{sender_name}”】说: {data.get('raw_message')}", websocket, "group")
+                        await manage_buffer(group_id, f"【“{sender_name}”】说: {data.get('raw_message')}", websocket, "group", raw_message=data.get('raw_message'))
         except:
             await asyncio.sleep(3)
 
-async def manage_buffer(chat_id, content, websocket, mode):
+async def manage_buffer(chat_id, content, websocket, mode, raw_message=''):
     global message_buffer, buffer_tasks, real_time_debounce_time
 
     if real_time_debounce_time <= 0:
@@ -360,6 +361,34 @@ async def manage_buffer(chat_id, content, websocket, mode):
         content = ''.join(result)
         print(f"[System] 压缩后长度: {len(content)} 字符")
     
+    # --- 拦截帮助指令并存入历史 ---
+    if raw_message in ['help', '/help', 'yuki帮助', 'yuki功能', '帮助', '功能']:
+        img_path = os.path.abspath("yuki_help.png")
+        cq_image = f"[CQ:image,file=file:///{img_path}]"
+        # 构造并发送消息
+        payload = {
+            "action": "send_group_msg" if mode == 'group' else "send_private_msg",
+            "params": {
+                "group_id" if mode == 'group' else "user_id": chat_id,
+                "message": cq_image
+            }
+        }
+        await websocket.send(json.dumps(payload))
+        print(f"[System] 已记录并发送帮助图")
+        # 记录到短期记忆历史中
+        # history = history_manager.get_history(chat_id)
+        # history.append({"role": "user", "content": f"(请求帮助文档: {content})"})
+        # history.append({"role": "assistant", "content": f"(已发送帮助文档图片: {cq_image})"})
+        # history_manager.save_history(chat_id, history)
+        # hist = history_manager.get_history(chat_id)
+        # hist.append({"role": "user", "content": f"(用户请求了帮助: {content})"})
+        # hist.append({"role": "assistant", "content": f"(Yuki已发送帮助文档图片: {cq_image})"})
+        # history_manager.save_history(chat_id, hist)
+        history_dict = history_manager.load()
+        history_dict[str(chat_id)].append({"role": "user", "content": f"(请求帮助文档: {content})"})
+        history_dict[str(chat_id)].append({"role": "assistant", "content": f"(已发送帮助文档图片: {cq_image})"})
+        history_manager.save(history_dict)
+        return 
     # 入队
     
     if chat_id not in yuki.message_buffer: yuki.message_buffer[chat_id] = []
