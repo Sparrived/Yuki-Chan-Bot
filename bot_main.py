@@ -235,6 +235,12 @@ async def process_messages(chat_id, websocket, mode):
         for diary_obj in reversed(relevant_diaries):  
             content = diary_obj['content'] # 提取文本内容
             combined_API_message.append({"role": "system", "content": f"【回忆】{content}"})
+        
+        # --- 调试输出：打印加权分和匹配到的关键词信息 ---
+        for i, diary_obj in enumerate(relevant_diaries[:3], 1): 
+            # 打印加权分和匹配到的关键词信息
+            print(f"[RAG-Debug] 回忆 {i} | 得分: {diary_obj['score']:.2f} | 详情: {diary_obj['debug']}")
+        
         # 3. 加入最近KEEP_LAST_DIALOGUE条对话（不包括系统消息）
         recent_msgs = [msg for msg in history_dict[cid][-KEEP_LAST_DIALOGUE-1:-1] if msg["role"] != "system"]
         combined_API_message.extend(recent_msgs)
