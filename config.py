@@ -21,32 +21,26 @@ RETRIEVAL_TOP_K = 20                        # 每次检索返回日记条数
 KEEP_LAST_DIALOGUE = 5                     # 保留最近对话条数（短期记忆）
 DIARY_THRESHOLD = 0.27                   # 日记相关性阈值（越低越严格）
 # ================= API配置 =================
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
-# DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
-DEEPSEEK_BASE_URL = "https://api.ytea.top/v1"
-SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "").strip()
-SILICONFLOW_API_URL = "https://api.siliconflow.cn/v1/chat/completions"
-OPENAI_API_KEY = DEEPSEEK_API_KEY  # 复用 DeepSeek 的 Key
-OPENAI_API_URL = "https://api.ytea.top/v1/chat/completions"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+TEATOP_BASE_URL = "https://api.ytea.top/v1"
+TEATOP_API_URL = "https://api.ytea.top/v1/chat/completions"
 
-# 调试输出（确认后可以删除）
-if not DEEPSEEK_API_KEY:
-    print("⚠️ 警告: DEEPSEEK_API_KEY 未设置")
-if not SILICONFLOW_API_KEY:
-    print("⚠️ 警告: SILICONFLOW_API_KEY 未设置")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
+TEATOP_API_KEY = os.getenv("TEATOP_API_KEY", "").strip()
 
 # ================= 连接配置 =================
 NAPCAT_WS_URL = "ws://127.0.0.1:3001"
 
 # ================= 目标配置 =================
-TARGET_QQ = 2962538973
-# TARGET_GROUP = 1034986009
-TARGET_GROUPS = [1057020972, 1085409165, 818038143, 742134223, 1034986009, 1057868210]   # 示例
-# TARGET_GROUPS = [1085409165]
-# TARGET_GROUP = 1057020972
+TARGET_QQ = 737337230
+# TARGET_GROUP = 1034986009 #猫猫窝
+TARGET_GROUPS = [1057020972, 1085409165, 818038143, 742134223, 1034986009, 1057868210, 1056258919]   # 示例
+# TARGET_GROUP = 1057020972 #ncbot乐园
 # TARGET_GROUP = 1085409165 #测试群
 # TARGET_GROUP = 818038143 #薄脆原味生态圈
-# TARGET_GROUP = 742134223
+# TARGET_GROUP = 742134223 #C406宿舍
+# 1056258919 # downs群
+# 1057868210 # mc群
 
 # ================= 文件配置 =================
 HISTORY_FILE = "chat_history.json"
