@@ -3,8 +3,7 @@ import aiohttp
 import os
 from dotenv import load_dotenv
 
-# 加载 .env 文件
-load_dotenv()
+load_dotenv(verbose=True)  # 显示加载信息
 # ================= 安全配置 =================
 MAX_MESSAGE_LENGTH = 200  # 最大消息长度，防止token炸弹
 
@@ -19,7 +18,6 @@ VECTOR_DB_PATH = "./yuki_memory"          # 向量数据库路径
 EMBED_MODEL = "./models/text2vec-base-chinese"  # 本地模型路径
 RETRIEVAL_TOP_K = 20                        # 每次检索返回日记条数
 KEEP_LAST_DIALOGUE = 5                     # 保留最近对话条数（短期记忆）
-DIARY_THRESHOLD = 0.27                   # 日记相关性阈值（越低越严格）
 # ================= API配置 =================
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 TEATOP_BASE_URL = "https://api.ytea.top/v1"
@@ -27,7 +25,8 @@ TEATOP_API_URL = "https://api.ytea.top/v1/chat/completions"
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 TEATOP_API_KEY = os.getenv("TEATOP_API_KEY", "").strip()
-
+if not TEATOP_API_KEY and not DEEPSEEK_API_KEY:
+    print("Warning: 未检测到任何有效的 API KEY，请检查 .env 文件。")
 # ================= 连接配置 =================
 NAPCAT_WS_URL = "ws://127.0.0.1:3001"
 
