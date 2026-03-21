@@ -25,6 +25,7 @@ async def main_process(chat_id, mode):
     messages = yuki.pop_buffer(chat_id)
     if not messages: return
     # 提高群聊的活跃度
+    first_time = time.time()
     await yuki.boost_activity(chat_id)
     # 视觉理解总处理
     combined_text = "\n".join(messages)
@@ -45,7 +46,7 @@ async def main_process(chat_id, mode):
     print(f"[{chat_id}] 收到消息{combined_text}")
     history_manager.append_to_log(chat_id, "User/Group", combined_text)
 
-
+    print("[System] 加载上下文信息...")
     # 加载上下文信息
     history_dict = history_manager.load()
     chat_id = str(chat_id)
@@ -54,6 +55,8 @@ async def main_process(chat_id, mode):
         history_dict[chat_id] = [{"role": "system", "content": yuki.get_setting(mode)}]
     # 添加当前消息到上下文池
     history_dict[chat_id].append({"role": "user", "content": combined_text})
+
+    print("[System] 加载完成")
 
     if (mode == "group") and (not await engine.decide_to_reply(history_dict[chat_id], combined_text, chat_id)): # 判定是否回复
         # 保存获取的上下文信息
@@ -67,57 +70,72 @@ async def main_process(chat_id, mode):
     relevant_diaries = memory_rag.search_diaries(combined_text, chat_id=chat_id)
     print(f"[System] 检索到 {len(relevant_diaries)} 条相关日记:")
 
+    print(f"检索完成，用时 {(time.time()-first_time):.2f}")
+
     Yuki_Answer = await engine.api_reply(chat_id, combined_text, history_dict, mode, relevant_diaries)
 
-    # 保存回复到上下文
-    history_manager.append_to_log(chat_id, "Yuki", Yuki_Answer)
-    history_dict[chat_id].append({"role": "assistant", "content": Yuki_Answer})
-    history_manager.save(history_dict)
-
+    print("Yuki打字完成！")
     if mode == "group":
         yuki.consume_energy()
     print(f"[System] Yuki 正在发送消息...(剩余精力: {yuki.energy:.1f})")
     await sender.send(chat_id, Yuki_Answer, mode=mode)
-
-
-
-
+    print(f"[System] 发送完成！内容：{Yuki_Answer}")
+    print("[System] Yuki正在保存上下文...")
+    # 保存回复到上下文
+    history_manager.append_to_log(chat_id, "Yuki", Yuki_Answer)
+    history_dict[chat_id].append({"role": "assistant", "content": Yuki_Answer})
+    history_manager.save(history_dict)
+    print("[System] 保存完成")
 
     # 日记触发检查：如果历史过长，强制写日记
     if len(history_dict[chat_id]) > DIARY_MAX_LENGTH:
         summarized_list = await engine.do_summarize(chat_id, history_dict[chat_id])
-
-        # 2. 【核心修改】将压缩后的“局部列表”更新回“全量字典”的一个分支
         history_dict[chat_id] = summarized_list
-
-        # 3. 保存整个大字典
         history_manager.save(history_dict)
         print(f"[{chat_id}] 日记写入完成，全量历史已同步。")
 
+
 async def napcat_listen(mode):
+    # 启动后台常驻任务
     if mode == "group":
         asyncio.create_task(yuki.decay_heartbeat())
-    # 启动日记检查
     asyncio.create_task(engine.idle_diary_checker())
-    print("[System] 已启动后台空闲日记检查任务")
-    print(f"[System] 连接 NapCat 服务端 | 模式: {mode} | 初始精力: {yuki.energy}")
     asyncio.create_task(engine.ice_break_monitor())
-    async for data in connector.listen():
-        if data.get("post_type") != "message": continue
+    print(f"[System] 已启动后台辅助任务 (日记检查/破冰/精力衰减)")
 
-        msg_type = data.get("message_type")
-        raw_msg = data.get("raw_message")
-        user_id = data.get("user_id")
+    print(f"[System] 准备连接 NapCat 服务端 | 模式: {mode} | 初始精力: {yuki.energy}")
+    while True:
+        try:
+            async for data in connector.listen():
+                if data.get("post_type") != "message":
+                    continue
 
-        if mode == "private" and msg_type == "private" and user_id == TARGET_QQ:
-            await manage_buffer(user_id, raw_msg, mode)
+                msg_type = data.get("message_type")
+                raw_msg = data.get("raw_message")
+                user_id = data.get("user_id")
 
-        elif mode == "group" and msg_type == "group":
-            group_id = data.get("group_id")
-            if not TARGET_GROUPS or group_id in TARGET_GROUPS:
-                sender_info = data.get("sender", {})
-                name = sender_info.get("card") or sender_info.get("nickname") or "路人"
-                await manage_buffer(group_id, f"【“{name}”】说: {raw_msg}", mode, raw_message=raw_msg)
+                if mode == "private" and msg_type == "private" and user_id == TARGET_QQ:
+                    await manage_buffer(user_id, raw_msg, mode)
+
+                elif mode == "group" and msg_type == "group":
+                    group_id = data.get("group_id")
+                    # 检查目标群白名单
+                    if not TARGET_GROUPS or group_id in TARGET_GROUPS:
+                        sender_info = data.get("sender", {})
+                        name = sender_info.get("card") or sender_info.get("nickname") or "路人"
+                        # 将消息存入缓冲区并触发主进程
+                        await manage_buffer(
+                            group_id,
+                            f"【“{name}”】说: {raw_msg}",
+                            mode,
+                            raw_message=raw_msg
+                        )
+
+        except Exception as e:
+            # 这里捕获的是 listen 循环抛出的致命异常（如代码逻辑错误或持续的连接失败）
+            print(f"[Critical] 监听主循环发生非预期崩溃: {e}")
+            print("[System] 5 秒后将尝试重启监听进程...")
+            await asyncio.sleep(5)
 
 async def manage_buffer(chat_id, content, mode, raw_message=''):
     global real_time_debounce_time
@@ -161,7 +179,7 @@ if __name__ == "__main__":
     # 实例化Yuki状态
     yuki = YukiState()
     # 实例化LLM请求器
-    llm = ApiCall(DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL)
+    llm = ApiCall(TEATOP_API_KEY, TEATOP_BASE_URL)
     # 实例化历史记录管理器
     history_manager = HistoryManager()
     print("[System] 开始初始化记忆系统（RAG）...")
