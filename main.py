@@ -24,7 +24,8 @@ async def main_process(chat_id, mode):
     real_time_debounce_time = DEBOUNCE_TIME  # 重置防抖时间，准备处理下一轮消息
     messages = yuki.pop_buffer(chat_id)
     if not messages: return
-
+    # 提高群聊的活跃度
+    await yuki.boost_activity(chat_id)
     # 视觉理解总处理
     combined_text = "\n".join(messages)
     modified_text, image_urls = meme_processor.extract_urls_from_text(combined_text)
@@ -78,8 +79,7 @@ async def main_process(chat_id, mode):
     print(f"[System] Yuki 正在发送消息...(剩余精力: {yuki.energy:.1f})")
     await sender.send(chat_id, Yuki_Answer, mode=mode)
 
-    # 提高群聊的活跃度
-    await yuki.boost_activity(chat_id)
+
 
 
 
