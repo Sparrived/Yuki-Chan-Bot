@@ -33,7 +33,7 @@ class YukiEngine:
         print(f"[System] Yuki 正在打字...")
         try:
             Yuki_Answer = await self.llm.robust_api_call(
-                model="deepseek-chat",
+                model="deepseek-v3.2",
                 messages=combined_API_message,
                 temperature=0.7,  # 降低温度，让它说话更稳、更常用
                 top_p=0.75,  # 稍微收窄采样范围，过滤冷门词
@@ -57,6 +57,11 @@ class YukiEngine:
         self.yuki.update_desire_to_reply(chat_id)
         desire = self.yuki.desire_to_start_topic.get(str(chat_id), 0)
 
+        current_e = self.yuki.update_energy()
+        if any(keyword in current_text for keyword in ["主人", "哥哥", "Yuki", "yuki"]):
+            print(f"[System] 检测到关键召唤，Yuki 强制清醒 (当前精力: {current_e:.1f})")
+            return True
+
         # --- 强干预层 ---
         if desire >= 80:
             print(f"[Decision] {chat_id} 欲望爆表({desire}%)，强制回复！")
@@ -64,12 +69,6 @@ class YukiEngine:
         if desire <= 30:
             print(f"[Decision] {chat_id} 欲望低迷({desire}%)，拒绝营业。")
             return False
-
-        current_e = self.yuki.update_energy()
-
-        if any(keyword in current_text for keyword in ["主人", "哥哥", "Yuki", "yuki"]):
-            print(f"[System] 检测到关键召唤，Yuki 强制清醒 (当前精力: {current_e:.1f})")
-            return True
 
         if current_e < MIN_ACTIVE_ENERGY:
             print(f"[System] Yuki 太累了... 正在潜水回复体力 (当前精力: {current_e:.1f})")
@@ -107,7 +106,7 @@ class YukiEngine:
             print(f"[System] 判定消息构建完成，正在发送API请求... (当前精力: {current_e:.1f})")
 
             raw_response = await self.llm.robust_api_call(
-                model="deepseek-chat",
+                model="deepseek-v3.2",
                 messages=messages,
                 max_tokens=10,
                 temperature=0.6
@@ -128,7 +127,7 @@ class YukiEngine:
         content_to_summarize = json.dumps(dialogue_msgs, ensure_ascii=False)
         try:
             diary_content = await self.llm.robust_api_call(
-                model="deepseek-chat",
+                model="deepseek-v3.2",
                 messages=[
                     {"role": "system", "content": f"{BASE_SETTING}"},
                     {"role": "user", "content": (
@@ -222,14 +221,13 @@ class YukiEngine:
         return combined_API_message
 
     async def ice_break_monitor(self):
-        await asyncio.sleep(2)
         while True:
+            # 巡检周期
+            await asyncio.sleep(random.randint(600, 1200))
             target_list = [str(gid) for gid in TARGET_GROUPS]
-            # 用来存放通过判定的群组，避免在锁内执行长任务
             pending_ice_break = []
 
             async with self.yuki.lock:
-                # --- 锁内只做纯数值计算和判定 ---
                 for cid in target_list:
                     activity = self.yuki.group_activity.get(cid, 0.0)
                     self.yuki.update_energy()
@@ -239,16 +237,12 @@ class YukiEngine:
                     if activity < 0.5 and desire > 75:
                         if random.random() < 0.8:
                             pending_ice_break.append(cid)
-            # --- 锁已释放 ---
 
-            # 执行破冰任务
             for cid in pending_ice_break:
-                print(f"[IceBreak] 目标群 {cid} 触发冷场唤醒！")
-                # 异步抛出，不等待它执行完，直接进入下一个循环的 sleep
+                print(f"[IceBreak] 目标群 {cid} 触发冷场唤醒")
                 asyncio.create_task(self.break_ice(cid))
 
-            # 巡检周期
-            await asyncio.sleep(random.randint(600, 1200))
+
 
     async def break_ice(self, chat_id: str) -> str:
         # 1. 异步加载历史 (假设 load 是同步的，我们用线程池跑它)
@@ -279,7 +273,7 @@ class YukiEngine:
         try:
             # 4. API 调用
             Yuki_Answer = await self.llm.robust_api_call(
-                model="deepseek-chat",
+                model="deepseek-v3.2",
                 messages=prompt,
                 temperature=0.8,  # 降低温度，让它说话更稳、更常用
                 top_p=0.9,  # 稍微收窄采样范围，过滤冷门词
