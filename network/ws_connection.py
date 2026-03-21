@@ -38,7 +38,12 @@ class BotConnector:
         """Receiver: 持续监听消息的生成器"""
         while True:
             try:
-                async with websockets.connect(self.ws_url) as ws:
+                async with websockets.connect(
+                        self.ws_url,
+                        ping_interval=30,  # 每30秒发一次心跳
+                        ping_timeout=30,  # 允许30秒内回Pong
+                        close_timeout=10
+                ) as ws:
                     self.websocket = ws
                     print(f"[Network] 已接通 NapCat 线路")
                     async for message in ws:

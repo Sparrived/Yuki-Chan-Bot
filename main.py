@@ -7,7 +7,6 @@ from core.brain import YukiState
 from core.engine import YukiEngine
 from core.history_manager import HistoryManager
 from modules.message.CQProtocol import smart_truncate
-from modules.message.build_context import build_chat_context
 from modules.message.CQParser import CQCodeParser
 from modules.vision.processor import MemeProcessor
 from network.ws_connection import BotConnector
@@ -68,13 +67,13 @@ async def main_process(chat_id, mode):
     print(f"[System] 检索到 {len(relevant_diaries)} 条相关日记:")
 
     # 总构建发送Deepseek补全的信息
-    combined_API_message = await build_chat_context(chat_id, combined_text, history_dict, mode, relevant_diaries)
+    combined_API_message = await engine.build_chat_context(chat_id, combined_text, history_dict, mode, relevant_diaries)
 
     try:
         # 发送对话补全到DeepSeek
         print(f"[System] Yuki 正在打字...")
         Yuki_Answer = llm.robust_api_call(
-            model = "deepseek-v3",
+            model = "deepseek-chat",
             messages = combined_API_message,
             temperature =0.7,  # 降低温度，让它说话更稳、更常用
             top_p = 0.75,  # 稍微收窄采样范围，过滤冷门词
@@ -99,8 +98,14 @@ async def main_process(chat_id, mode):
 
     # 日记触发检查：如果历史过长，强制写日记
     if len(history_dict[chat_id]) > DIARY_MAX_LENGTH:
-        new_history = await engine.do_summarize(chat_id, history_dict[chat_id])
-        history_manager.save(new_history)
+        summarized_list = await engine.do_summarize(chat_id, history_dict[chat_id])
+
+        # 2. 【核心修改】将压缩后的“局部列表”更新回“全量字典”的一个分支
+        history_dict[chat_id] = summarized_list
+
+        # 3. 保存整个大字典
+        history_manager.save(history_dict)
+        print(f"[{chat_id}] 日记写入完成，全量历史已同步。")
 
 
 async def napcat_listen(mode):

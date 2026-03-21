@@ -21,14 +21,15 @@ class HistoryManager:
                 self._cache = self.read_from_disk()
             return self._cache
 
-
     def read_from_disk(self) -> dict:
-        """【内部调用】从硬盘读取数据"""
+        """从硬盘读取数据，增加格式校验"""
         if not os.path.exists(self.history_file):
             return {}
         try:
             with open(self.history_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                # 如果读出来的是 list 或者是 None，强行转成 dict
+                return data if isinstance(data, dict) else {}
         except Exception as e:
             print(f"[History] 加载文件失败: {e}")
             return {}
