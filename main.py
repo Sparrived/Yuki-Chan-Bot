@@ -142,6 +142,13 @@ async def napcat_listen(mode):
 
 async def manage_buffer(chat_id, content, mode, raw_message=''):
     global real_time_debounce_time
+    cid_str = str(chat_id)
+
+    # --- 新增：只要收到消息，就重置该群的破冰失败计数 ---
+    if cid_str in yuki.ice_break_fail_count:
+        if yuki.ice_break_fail_count[cid_str] > 0:
+            print(f"[IceBreak] {cid_str} 收到新消息，重置破冰计数器。")
+        yuki.ice_break_fail_count[cid_str] = 0
 
     if real_time_debounce_time <= 0:
         real_time_debounce_time = DEBOUNCE_TIME  # 重置防抖时间，避免长时间关闭防抖导致过度频繁响应

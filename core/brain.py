@@ -18,6 +18,7 @@ class YukiState:
         self.last_message_time = {} # chat_id: timestamp
         self.writing_diary = set()  # chat_id
         self.desire_to_start_topic = {} # chat_id
+        self.ice_break_fail_count = {}  # {chat_id: count} 新增：破冰无人理睬计数
 
         # --- 新增：活跃度感知 ---
         # chat_id: float (0.0 ~ 10.0, 10 代表极度刷屏)

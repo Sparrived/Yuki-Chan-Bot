@@ -223,26 +223,29 @@ class YukiEngine:
 
     async def ice_break_monitor(self):
         while True:
-            # 巡检周期
-
+            await asyncio.sleep(random.randint(600, 1200))
             target_list = [str(gid) for gid in TARGET_GROUPS]
             pending_ice_break = []
 
             async with self.yuki.lock:
                 for cid in target_list:
                     activity = self.yuki.group_activity.get(cid, 0.0)
-                    self.yuki.update_energy(chat_id=cid)
-                    self.yuki.update_desire_to_reply(cid)
                     desire = self.yuki.desire_to_start_topic.get(cid, 0)
 
-                    if activity < 0.5 and desire > 75:
+                    # 获取当前的失败次数，默认为 0
+                    fail_count = self.yuki.ice_break_fail_count.get(cid, 0)
+
+                    # 修改判定条件：只有失败次数 < 2 时才允许破冰
+                    if activity < 0.5 and desire > 75 and fail_count < 2:
                         if random.random() < 0.8:
                             pending_ice_break.append(cid)
+                    elif fail_count >= 2:
+                        print(f"[IceBreak] {cid} 连续两次破冰无果，进入自闭模式，等待群友先开口。")
 
             for cid in pending_ice_break:
                 print(f"[IceBreak] 目标群 {cid} 触发冷场唤醒")
                 asyncio.create_task(self.break_ice(cid))
-            await asyncio.sleep(random.randint(600, 1200))
+
 
 
 
