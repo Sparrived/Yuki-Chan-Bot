@@ -76,8 +76,8 @@ async def main_process(chat_id, mode):
 
     print("Yuki打字完成！")
     if mode == "group":
-        yuki.consume_energy()
-    print(f"[System] Yuki 正在发送消息...(剩余精力: {yuki.energy:.1f})")
+        yuki.consume_energy(chat_id)
+    print(f"[System] Yuki 正在发送消息...(剩余精力: {yuki.energy[chat_id]:.1f})")
     await sender.send(chat_id, Yuki_Answer, mode=mode)
     print(f"[System] 发送完成！内容：{Yuki_Answer}")
     print("[System] Yuki正在保存上下文...")
@@ -101,9 +101,12 @@ async def napcat_listen(mode):
         asyncio.create_task(yuki.decay_heartbeat())
     asyncio.create_task(engine.idle_diary_checker())
     asyncio.create_task(engine.ice_break_monitor())
+
+    for chat_id in TARGET_GROUPS:
+        print(f"[System] 初始化{chat_id}精力为{yuki.update_energy(chat_id)}")
     print(f"[System] 已启动后台辅助任务 (日记检查/破冰/精力衰减)")
 
-    print(f"[System] 准备连接 NapCat 服务端 | 模式: {mode} | 初始精力: {yuki.energy}")
+    print(f"[System] 准备连接 NapCat 服务端 | 模式: {mode}")
     while True:
         try:
             async for data in connector.listen():

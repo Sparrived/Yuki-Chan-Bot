@@ -2,6 +2,8 @@
 import datetime
 import math
 
+from conda.common.constants import NULL
+
 from core.prompts import YUKI_SETTING_PRIVATE, YUKI_SETTING_GROUP
 from config import *
 import asyncio
@@ -9,8 +11,8 @@ import asyncio
 class YukiState:
     def __init__(self):
         self.lock = asyncio.Lock()  # 进程锁，保护数值计算
-        self.energy = INITIAL_ENERGY
-        self.last_update = datetime.datetime.now()
+        self.energy = {}  # {chat_id: current_energy}
+        self.last_update = {}
         self.message_buffer = {}  # chat_id: [messages]
         self.buffer_tasks = {}    # chat_id: task
         self.last_message_time = {} # chat_id: timestamp
@@ -65,17 +67,24 @@ class YukiState:
     def get_setting(mode):
         return YUKI_SETTING_PRIVATE if mode == "private" else YUKI_SETTING_GROUP
 
-    def update_energy(self):
+    def update_energy(self, chat_id):
         """计算并更新当前精力值"""
         now = datetime.datetime.now()
-        duration_mins = (now - self.last_update).total_seconds() / 60
-        self.energy = min(MAX_ENERGY, self.energy + (duration_mins * RECOVERY_PER_MIN))
-        self.last_update = now
-        return self.energy
+        # 初始化该群精力
+        if chat_id not in self.energy:
+            self.energy[chat_id] = INITIAL_ENERGY
+            self.last_update[chat_id] = now
+            return self.energy[chat_id]
+        duration_mins = (now - self.last_update[chat_id]).total_seconds() / 60
+        self.energy[chat_id] = min(MAX_ENERGY, self.energy[chat_id] + (duration_mins * RECOVERY_PER_MIN))
+        self.last_update[chat_id] = now
+        return self.energy[chat_id]
 
-    def consume_energy(self):
+    def consume_energy(self, chat_id):
         """消耗精力值"""
-        self.energy = max(0.0, self.energy - COST_PER_REPLY)
+
+        if chat_id in self.energy:
+            self.energy[chat_id] = max(0.0, self.energy[chat_id] - COST_PER_REPLY)
 
     def update_desire_to_reply(self, chat_id):
         """
@@ -90,10 +99,10 @@ class YukiState:
 
         # --- 计算逻辑保持不变 ---
         # 模式 A: 跟风 (0.0~1.0 比例)
-        follow_desire = recent_activity_level * 80 * (self.energy / 100)
+        follow_desire = recent_activity_level * 80 * (self.energy[chat_id] / 100)
 
         # 模式 B: 破冰
-        ice_break_desire = (1.0 - recent_activity_level) * 60 * max(0, (self.energy - 60) / 40)
+        ice_break_desire = (1.0 - recent_activity_level) * 60 * max(0, (self.energy[chat_id] - 60) / 40)
 
         # 融合平滑时间权重
         total_desire = max(follow_desire, ice_break_desire) * self.get_smooth_time_weight()
@@ -116,32 +125,111 @@ class YukiState:
             del self.buffer_tasks[chat_id]
         return msgs
 
+    # @staticmethod
+    # def get_smooth_time_weight() -> float:
+    #     """
+    #     使用余弦平滑算法计算生物钟权重
+    #     实现从深夜到饭点的无缝平滑过渡
+    #     """
+    #     # 获取当前时间（带分钟，保证秒级平滑）
+    #     now = datetime.datetime.now()
+    #     t = now.hour + now.minute / 60.0
+    #
+    #     # --- 构造双峰生物钟模型 ---
+    #     # 基础权重 0.8 (白天平稳期)
+    #     base = 0.8
+    #
+    #     # 模拟深夜 (3:00 为最冷清点)
+    #     # 使用 cos( (t-3)*pi/12 )，在3点时为 1，在15点时为 -1
+    #     night_factor = math.cos((t - 3) * math.pi / 12)
+    #
+    #     # 模拟饭点 (12:00 和 19:00 为高峰)
+    #     # 使用周期更短的波来模拟两个进食高峰
+    #     lunch_peak = math.exp(-((t - 12.5) ** 2 / 4)) * 0.5  # 12:30 附近
+    #     dinner_peak = math.exp(-((t - 19.5) ** 2 / 4)) * 0.5  # 19:30 附近
+    #
+    #     # 融合权重
+    #     # 夜间 night_factor 大，我们减去它；饭点峰值我们加上它
+    #     weight = base - (night_factor * 0.5) + lunch_peak + dinner_peak
+    #
+    #     # 最终映射到 [0.2, 1.5] 之间
+    #     return max(0.2, min(weight, 1.5))
     @staticmethod
     def get_smooth_time_weight() -> float:
         """
-        使用余弦平滑算法计算生物钟权重
-        实现从深夜到饭点的无缝平滑过渡
+        优化后的生物钟模型：分段基准 + 高斯活跃峰
+        解决清晨不醒、下午太累、深夜早退的问题
         """
-        # 获取当前时间（带分钟，保证秒级平滑）
+
         now = datetime.datetime.now()
         t = now.hour + now.minute / 60.0
 
-        # --- 构造双峰生物钟模型 ---
-        # 基础权重 0.8 (白天平稳期)
-        base = 0.8
+        # 1. 定义基础背景 (Base Line) - 优化后的睡眠模型
+        if 0 <= t < 7.8:
+            if t < 1.0:
+                # 快速入睡：0点到2点迅速下滑
+                base = 0.7 - (t / 1.0) * 0.45
+            elif 1.0 <= t < 7.0:
+                # 深睡稳态：维持极低权重 (0.25)
+                base = 0.25
+            else:
+                # 黎明回升：5点到7.2点从小幅回升，准备迎接晨间高峰
+                base = 0.25 + ((t - 7.0) / 0.8) * 0.45
+        elif t >= 23.8:
+            # 23点后快速收尾入睡
+            base = 0.9 - (t - 23.8) * 0.8
+        else:
+            # 白天标准基准
+            base = 0.9
 
-        # 模拟深夜 (3:00 为最冷清点)
-        # 使用 cos( (t-3)*pi/12 )，在3点时为 1，在15点时为 -1
-        night_factor = math.cos((t - 3) * math.pi / 12)
+        # 2. 活跃峰值函数 (Gaussian Peaks)
+        def peak(time, mu, sig, amp):
+            return amp * math.exp(-((time - mu) ** 2) / (2 * sig ** 2))
 
-        # 模拟饭点 (12:00 和 19:00 为高峰)
-        # 使用周期更短的波来模拟两个进食高峰
-        lunch_peak = math.exp(-((t - 12.5) ** 2 / 4)) * 0.5  # 12:30 附近
-        dinner_peak = math.exp(-((t - 19.5) ** 2 / 4)) * 0.5  # 19:30 附近
+        # --- 活跃点注入 ---
+        # 晨间苏醒: 8点峰值，sigma缩窄到0.4让爆发力更集中
+        morning = peak(t, 8.0, 0.6, 0.5)
+        # 午后高峰: 12.8点
+        lunch = peak(t, 12.8, 0.8, 0.4)
+        # 晚间活跃: 20.0点，sigma较宽(1.0)模拟长夜畅谈
+        evening = peak(t, 20.0, 1.5, 0.4)
 
-        # 融合权重
-        # 夜间 night_factor 大，我们减去它；饭点峰值我们加上它
-        weight = base - (night_factor * 0.5) + lunch_peak + dinner_peak
+        # 3. 融合结果并限幅
+        weight = base + morning + lunch + evening
+        return max(0.2, min(weight, 1.5))
 
-        # 最终映射到 [0.2, 1.5] 之间
+    @staticmethod
+    def get_smooth_time_weight_test(t) -> float:
+        # 1. 定义基础背景 (Base Line) - 优化后的睡眠模型
+        if 0 <= t < 7.8:
+            if t < 1.0:
+                # 快速入睡：0点到2点迅速下滑
+                base = 0.7 - (t / 1.0) * 0.45
+            elif 1.0 <= t < 7.0:
+                # 深睡稳态：维持极低权重 (0.25)
+                base = 0.25
+            else:
+                # 黎明回升：5点到7.2点从小幅回升，准备迎接晨间高峰
+                base = 0.25 + ((t - 7.0) / 0.8) * 0.45
+        elif t >= 23.8:
+            # 23点后快速收尾入睡
+            base = 0.9 - (t - 23.8) * 0.8
+        else:
+            # 白天标准基准
+            base = 0.9
+
+        # 2. 活跃峰值函数 (Gaussian Peaks)
+        def peak(time, mu, sig, amp):
+            return amp * math.exp(-((time - mu) ** 2) / (2 * sig ** 2))
+
+        # --- 活跃点注入 ---
+        # 晨间苏醒: 8点峰值，sigma缩窄到0.4让爆发力更集中
+        morning = peak(t, 8.0, 0.6, 0.5)
+        # 午后高峰: 12.8点
+        lunch = peak(t, 12.8, 0.8, 0.4)
+        # 晚间活跃: 20.0点，sigma较宽(1.0)模拟长夜畅谈
+        evening = peak(t, 20.0, 1.5, 0.4)
+
+        # 3. 融合结果并限幅
+        weight = base + morning + lunch + evening
         return max(0.2, min(weight, 1.5))

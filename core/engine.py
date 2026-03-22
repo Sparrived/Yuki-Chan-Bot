@@ -53,12 +53,13 @@ class YukiEngine:
             三段式决策：强干预 -> 弱判定 -> 逻辑判定
             """
         # 1. 更新并获取当前群聊的欲望值
-        self.yuki.update_energy()
+        current_e = self.yuki.update_energy(chat_id)
         self.yuki.update_desire_to_reply(chat_id)
         desire = self.yuki.desire_to_start_topic.get(str(chat_id), 0)
 
-        current_e = self.yuki.update_energy()
-        if any(keyword in current_text for keyword in ["主人", "哥哥", "Yuki", "yuki"]):
+        if "BOT" in current_text:
+            print("[System] 检测到BOT发Yuki的名字，过滤……")
+        if any(keyword in current_text for keyword in ["主人", "哥哥", "Yuki", "yuki"]) and ("BOT" not in current_text):
             print(f"[System] 检测到关键召唤，Yuki 强制清醒 (当前精力: {current_e:.1f})")
             return True
 
@@ -223,14 +224,14 @@ class YukiEngine:
     async def ice_break_monitor(self):
         while True:
             # 巡检周期
-            await asyncio.sleep(random.randint(600, 1200))
+
             target_list = [str(gid) for gid in TARGET_GROUPS]
             pending_ice_break = []
 
             async with self.yuki.lock:
                 for cid in target_list:
                     activity = self.yuki.group_activity.get(cid, 0.0)
-                    self.yuki.update_energy()
+                    self.yuki.update_energy(chat_id=cid)
                     self.yuki.update_desire_to_reply(cid)
                     desire = self.yuki.desire_to_start_topic.get(cid, 0)
 
@@ -241,6 +242,7 @@ class YukiEngine:
             for cid in pending_ice_break:
                 print(f"[IceBreak] 目标群 {cid} 触发冷场唤醒")
                 asyncio.create_task(self.break_ice(cid))
+            await asyncio.sleep(random.randint(600, 1200))
 
 
 
@@ -291,8 +293,8 @@ class YukiEngine:
 
             # 6. 【核心修复】安全地消耗精力
             async with self.yuki.lock:
-                self.yuki.consume_energy()
-                current_energy = self.yuki.energy
+                self.yuki.consume_energy(chat_id)
+                current_energy = self.yuki.energy[chat_id]
 
             print(f"[System] 破冰成功！发送给 {chat_id} (剩余精力: {current_energy:.1f})")
             await self.sender.send(chat_id, Yuki_Answer, mode="group")
