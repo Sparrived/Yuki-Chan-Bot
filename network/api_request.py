@@ -14,7 +14,7 @@ class ApiCall:
 
     def check_auto_recovery(self):
         """检查并尝试恢复熔断状态"""
-        if self.is_degraded and (time.time() - self.last_fail_time > 600):
+        if self.is_degraded and (time.time() - self.last_fail_time > 60):
             self.is_degraded = False
             self.fail_count = 0
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [System] 尝试恢复 TEATOP 主线路...")
@@ -33,6 +33,7 @@ class ApiCall:
             if self.is_degraded or attempt > 0:
                 current_client = AsyncOpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
                 current_model = "deepseek-chat"
+                print("[Critical] 主线路异常，本次请求切换至DEEPSEEK官方线路")
 
                 # 仅在第一次从主线路切换到备用线路时打印提示
                 if not self.is_degraded and attempt > 0:
