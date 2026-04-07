@@ -1,5 +1,4 @@
 # 忽略整个文件夹
-before_refactor/Legacy/
 .idea/
 .env
 .vscode/
