@@ -4,7 +4,7 @@ import os
 
 # 从你 config 里的配置读取
 model_name = "shibing624/text2vec-base-chinese"
-save_path = "../before_refactor/models/text2vec-base-chinese"
+save_path = "../models/text2vec-base-chinese"
 
 print(f"🚀 正在准备导出模型: {model_name}")
 print("这一步可能会因为联网检查卡顿几秒，请稍等...")
