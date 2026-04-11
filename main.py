@@ -2,6 +2,8 @@
 # by: Eganchiyu
 import asyncio
 import time
+import datetime
+import sys
 
 from core.brain import YukiState
 from core.engine import YukiEngine
@@ -13,9 +15,25 @@ from network.ws_connection import BotConnector
 from network.ws_sender import MessageSender
 from network.api_request import ApiCall
 from config import *
-
 # 初始化全局变量：消息缓冲和定时任务
 real_time_debounce_time = DEBOUNCE_TIME
+
+def check_config():
+    """在启动前进行最后的物理检查"""
+    if not os.path.exists(".env"):
+        env_choice = input("检测到尚未进行基础配置，是否现在运行配置向导？(y/n): ")
+        if env_choice.lower() == 'y':
+            from setup import quick_setup
+            quick_setup(0)  # 以刷新模式运行
+        else:
+            print("请手动运行 python quick_setup.py 后再启动。")
+            sys.exit(0)
+
+    required_files = [".env", "blacklist.txt", "./models/text2vec-base-chinese/config.json"]
+    for f in required_files:
+        if not os.path.exists(f):
+            # 抛出异常，触发下面的错误引导
+            raise FileNotFoundError(f"关键配置文件或模型缺失: {f}")
 
 async def main_process(chat_id, mode):
     """处理缓冲中的消息，进行API交互和回复 """
@@ -56,7 +74,12 @@ async def main_process(chat_id, mode):
     if chat_id not in history_dict:
         history_dict[chat_id] = [{"role": "system", "content": yuki.get_setting(mode)}]
     # 添加当前消息到上下文池
-    history_dict[chat_id].append({"role": "user", "content": combined_text})
+    current_time_str = datetime.datetime.now().strftime("%Y年%m月%d日%H:%M")
+    history_dict[chat_id].append({
+        "role": "user", 
+        "content": combined_text,
+        "time": current_time_str  # 新增独立字段
+    })
 
     print("[System] 加载完成")
 
@@ -85,7 +108,11 @@ async def main_process(chat_id, mode):
     print("[System] Yuki正在保存上下文...")
     # 保存回复到上下文
     history_manager.append_to_log(chat_id, "Yuki", Yuki_Answer)
-    history_dict[chat_id].append({"role": "assistant", "content": Yuki_Answer})
+    history_dict[chat_id].append({
+        "role": "assistant", 
+        "content": Yuki_Answer,
+        "time": current_time_str  # 新增独立字段
+    })
     history_manager.save(history_dict)
     print("[System] 保存完成")
 
@@ -189,40 +216,58 @@ async def manage_buffer(chat_id, content, mode, raw_message='', sender_name = ''
     yuki.buffer_tasks[chat_id] = asyncio.create_task(main_process(chat_id, mode))
 
 if __name__ == "__main__":
-    print("[System] Yuki 正在初始化...")
-    start_time = time.time()
+    try:
+        print("[System] 请确保已运行setup.py进行初始化配置！")
+        print("[System] Yuki 正在初始化...")
+        start_time = time.time()
 
-    # 加载与Napcat通信的Websocket服务
-    connector = BotConnector(NAPCAT_WS_URL)
-    # 实例化消息发送器
-    sender = MessageSender(connector)
-    # 实例化CQ码处理器
-    parser = CQCodeParser(connector)
-    # 实例化表情处理器
-    meme_processor = MemeProcessor()
-    # 实例化Yuki状态
-    yuki = YukiState()
-    # 实例化LLM请求器
-    llm = ApiCall(TEATOP_API_KEY, TEATOP_BASE_URL)
-    # 实例化历史记录管理器
-    history_manager = HistoryManager()
-    print("[System] 开始初始化记忆系统（RAG）...")
-    from modules.memory.rag import MemoryRAG
-    # 初始化向量记忆库
-    memory_rag = MemoryRAG()
-    # 实例化Yuki主引擎
-    engine = YukiEngine(llm, memory_rag, history_manager, yuki, sender)
-    end_time = time.time()
-    print(f"[System] 初始化完成，耗时 {end_time - start_time:.1f} 秒")
-    choice = input("[System] 选择模式：1. 私聊模式  2. 群聊模式（默认）\n请输入数字: ").strip()
-    if choice != "2":
-        # 初始化巡检名单，预载历史中的群聊ID和最后消息时间，确保后台检查能正常工作
-        h_dict = history_manager.load()
-        for cid in TARGET_GROUPS:
-            yuki.last_message_time[str(cid)] = time.time()
-            current_e = yuki.update_energy(str(cid))
-            yuki.update_desire_to_reply(str(cid))
-            print(
-                f"[System] 预热群组 {str(cid)}: 精力 {current_e:.1f}, 初始欲望 {yuki.desire_to_start_topic.get(str(cid), 0)}%")
-        print(f"DEBUG: 已预载 {len(yuki.last_message_time)} 个群组到巡检名单")
-    asyncio.run(napcat_listen("private" if choice == "1" else "group"))
+        # 加载与Napcat通信的Websocket服务
+        connector = BotConnector(NAPCAT_WS_URL)
+        # 实例化消息发送器
+        sender = MessageSender(connector)
+        # 实例化CQ码处理器
+        parser = CQCodeParser(connector)
+        # 实例化表情处理器
+        meme_processor = MemeProcessor()
+        # 实例化Yuki状态
+        yuki = YukiState()
+        # 实例化LLM请求器
+        llm = ApiCall(LLM_API_KEY, LLM_BASE_URL)
+        # 实例化历史记录管理器
+        history_manager = HistoryManager()
+        print("[System] 开始初始化记忆系统（RAG）...")
+        from modules.memory.rag import MemoryRAG
+        # 初始化向量记忆库
+        memory_rag = MemoryRAG()
+        # 实例化Yuki主引擎
+        engine = YukiEngine(llm, memory_rag, history_manager, yuki, sender)
+        end_time = time.time()
+        print(f"[System] 初始化完成，耗时 {end_time - start_time:.1f} 秒")
+        choice = input("[System] 选择模式：1. 私聊模式  2. 群聊模式（默认）\n请输入数字: ").strip()
+        if choice != "2":
+            # 初始化巡检名单，预载历史中的群聊ID和最后消息时间，确保后台检查能正常工作
+            h_dict = history_manager.load()
+            for cid in TARGET_GROUPS:
+                yuki.last_message_time[str(cid)] = time.time()
+                current_e = yuki.update_energy(str(cid))
+                yuki.update_desire_to_reply(str(cid))
+                print(
+                    f"[System] 预热群组 {str(cid)}: 精力 {current_e:.1f}, 初始欲望 {yuki.desire_to_start_topic.get(str(cid), 0)}%")
+            print(f"DEBUG: 已预载 {len(yuki.last_message_time)} 个群组到巡检名单")
+        asyncio.run(napcat_listen("private" if choice == "1" else "group"))
+
+    except (FileNotFoundError, ImportError, KeyError) as e:
+        print("\n" + "=" * 50)
+        print("启动失败：环境配置似乎不完整")
+        print(f"具体错误: {e}")
+        print("-" * 50)
+        print("💡 建议操作：")
+        print("   请运行 [ python quick_setup.py ] 进行一键修复/配置。")
+        print("   该脚本会自动安装依赖、生成配置文件并下载模型。")
+        print("=" * 50 + "\n")
+        sys.exit(1)
+
+    except Exception as e:
+        print(f"发生未知致命错误: {e}")
+        # 这里可以选择记录日志
+        sys.exit(1)
