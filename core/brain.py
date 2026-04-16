@@ -2,6 +2,8 @@
 import datetime
 import math
 from collections import defaultdict
+from concurrent.futures.thread import ThreadPoolExecutor
+
 from core.prompts import YUKI_SETTING_PRIVATE, YUKI_SETTING_GROUP
 from config import *
 import asyncio
@@ -17,6 +19,10 @@ class YukiState:
         self.writing_diary = set()  # chat_id
         self.desire_to_start_topic = {} # chat_id
         self.ice_break_fail_count = {}  # {chat_id: count} 新增：破冰无人理睬计数
+        # 在 __init__ 里添加
+        self.maid_task_queue = asyncio.Queue()
+        self.maid_current_tasks = {}  # chat_id -> 当前任务描述（让Yuki知道她在干什么）
+        self.maid_executor = ThreadPoolExecutor(max_workers=2)  # 并行执行小女仆
 
         # --- 新增：活跃度感知 ---
         # chat_id: float (0.0 ~ 10.0, 10 代表极度刷屏)

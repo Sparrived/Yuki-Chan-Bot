@@ -35,13 +35,17 @@ def check_config():
             # 抛出异常，触发下面的错误引导
             raise FileNotFoundError(f"关键配置文件或模型缺失: {f}")
 
-async def main_process(chat_id, mode):
+async def main_process(chat_id, mode, debounce_flag=True, force_reply=None):
     """处理缓冲中的消息，进行API交互和回复 """
     global real_time_debounce_time
-    await asyncio.sleep(real_time_debounce_time)  # 防抖等待，合并短时间内的多条消息
+    if debounce_flag:
+        await asyncio.sleep(real_time_debounce_time)  # 防抖等待，合并短时间内的多条消息
+    else:
+        await asyncio.sleep(0.5)
     real_time_debounce_time = DEBOUNCE_TIME  # 重置防抖时间，准备处理下一轮消息
     message_objs = yuki.pop_buffer(chat_id)  # 此时拿到的是 list[dict]
-    if not message_objs: return
+    if not message_objs and not force_reply:
+        return
     # 提高群聊的活跃度
     first_time = time.time()
     await yuki.boost_activity(chat_id)
@@ -83,7 +87,7 @@ async def main_process(chat_id, mode):
 
     print("[System] 加载完成")
 
-    if (mode == "group") and (not await engine.decide_to_reply(history_dict[chat_id], message_objs, chat_id)):
+    if (mode == "group") and (not await engine.decide_to_reply(history_dict[chat_id], message_objs, chat_id,force_reply = force_reply)):
         # 保存获取的上下文信息
         history_manager.save(history_dict)
         print("[System] Yuki 决定继续潜水...")
@@ -130,7 +134,8 @@ async def napcat_listen(mode):
         asyncio.create_task(yuki.decay_heartbeat())
     asyncio.create_task(engine.idle_diary_checker())
     asyncio.create_task(engine.ice_break_monitor())
-
+    from core.engine import maid_worker
+    asyncio.create_task(maid_worker(engine, yuki, sender, history_manager))
     # for chat_id in TARGET_GROUPS:
     #     print(f"[System] 初始化{chat_id}精力为{yuki.update_energy(chat_id)}")
     print(f"[System] 已启动后台辅助任务 (日记检查/破冰/精力衰减)")
@@ -210,7 +215,7 @@ async def manage_buffer(chat_id, content, mode, raw_message='', sender_name = ''
         "is_bot": is_bot
     })
 
-    if "yuki" in raw_message.lower():  # 使用原始文本判断，更准确
+    if ROBOT_NAME.lower() in raw_message.lower():  # 使用原始文本判断，更准确
         real_time_debounce_time = 5
     if chat_id in yuki.buffer_tasks: yuki.buffer_tasks[chat_id].cancel()
     yuki.buffer_tasks[chat_id] = asyncio.create_task(main_process(chat_id, mode))
@@ -241,6 +246,9 @@ if __name__ == "__main__":
         memory_rag = MemoryRAG()
         # 实例化Yuki主引擎
         engine = YukiEngine(llm, memory_rag, history_manager, yuki, sender)
+        engine.process_callback = main_process
+        # 在 engine = YukiEngine(...) 之后
+
         end_time = time.time()
         print(f"[System] 初始化完成，耗时 {end_time - start_time:.1f} 秒")
         choice = input("[System] 选择模式：1. 私聊模式  2. 群聊模式（默认）\n请输入数字: ").strip()

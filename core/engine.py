@@ -9,6 +9,7 @@ from typing import Any
 from core.prompts import BASE_SETTING, SUMMARY_PROMPT, build_chat_context
 from config import *
 from core.prompts import build_ice_break_prompt
+from core.maid import maid_evolution_loop
 
 
 class YukiEngine:
@@ -18,6 +19,8 @@ class YukiEngine:
         self.history = history_manager
         self.yuki = yuki_state
         self.sender = sender
+        self.maid = None  # 后面再赋值
+        self.process_callback = None  # 预留回调接口
 
     async def api_reply(self, chat_id: str, combined_text: str, history_dict: dict, mode, relevant_diaries: list[Any]) -> str:
         # 总构建发送Deepseek补全的信息
@@ -42,17 +45,32 @@ class YukiEngine:
                 max_tokens=100  # 强制短句，短句更容易显自然
             )
             Yuki_Answer = re.sub(r'\s*FINISHED\s*$', '', Yuki_Answer, flags=re.IGNORECASE)
+            delegate_match = re.search(r'\[DELEGATE_TO_MAID:(.+?)\]', Yuki_Answer, re.DOTALL)
+            if delegate_match:
+                task_desc = delegate_match.group(1).strip()
+                # 移除标签，干净回复发给用户
+                Yuki_Answer = re.sub(r'\[DELEGATE_TO_MAID:.+?\]', '', Yuki_Answer, flags=re.DOTALL).strip()
+
+                # 扔进小女仆队列（非阻塞）
+                await self.yuki.maid_task_queue.put({
+                    "goal": task_desc,
+                    "chat_id": chat_id
+                })
+                print(f"📤 已委托小女仆：{task_desc}")
             return Yuki_Answer
         except Exception as e:
             print(f"调用失败: {e}")
             return f"API 接口调用失败"
 
-    async def decide_to_reply(self, history, message_objs, chat_id):
+    async def decide_to_reply(self, history, message_objs, chat_id,force_reply = False):
         """判断是否回复群聊"""
         # 1. 更新并获取当前群聊的欲望值
         current_e = self.yuki.update_energy(chat_id)
         self.yuki.update_desire_to_reply(chat_id)
         desire = self.yuki.desire_to_start_topic.get(str(chat_id), 0)
+
+        if force_reply:
+            return True
 
         human_calling = any(
             not m["is_bot"] and any(kw in m["raw_text"].lower() for kw in keywords)
@@ -287,3 +305,73 @@ class YukiEngine:
         except Exception as e:
             print(f"Deepseek 破冰调用失败: {e}")
             return f"API 调用失败"
+
+# core/engine.py 末尾新增（或替换原来的 maid_worker）
+
+async def maid_worker(engine, yuki_state, sender, history_manager):
+    """小女仆后台常驻 Worker - 完成后交还给 engine 触发正常回复流程"""
+    while True:
+        task = await yuki_state.maid_task_queue.get()
+        goal = task["goal"]
+        chat_id = str(task["chat_id"])
+        mode = task.get("mode", "group")   # 默认群聊
+
+        # 更新当前任务状态（让 Yuki 能感知到“小女仆正在干这个”）
+        yuki_state.maid_current_tasks[chat_id] = goal
+
+        print(f"🧹 小女仆开始后台工作: {goal} (chat_id: {chat_id})")
+
+        # 非阻塞执行（线程池运行同步的 ollama 循环）
+        loop = asyncio.get_running_loop()
+        result_dict = await loop.run_in_executor(
+            yuki_state.maid_executor,
+            maid_evolution_loop,
+            goal,
+            chat_id
+        )
+
+        # 清除任务状态
+        yuki_state.maid_current_tasks.pop(chat_id, None)
+
+        # 构造汇报内容
+        report = f"【小女仆完成! 小女仆汇报】\n任务：「{goal}」\n结果：{result_dict.get('result', '未知结果')}"
+
+        print(f"✅ 小女仆任务完成，准备交还给主流程: {chat_id}")
+
+        # === 关键修改部分 ===
+        try:
+            # 1. 加载当前历史
+            history_dict = history_manager.load()
+            if chat_id not in history_dict:
+                history_dict[chat_id] = [{"role": "system", "content": yuki_state.get_setting(mode)}]
+
+            current_time_str = datetime.datetime.now().strftime("%Y年%m月%d日%H:%M")
+
+            # 2. 把小女仆汇报作为 assistant 消息写入历史（这样 Yuki 下次看到的就是“自己”的汇报）
+            history_dict[chat_id].append({
+                "role": "assistant",
+                "content": report,
+                "time": current_time_str,
+                "is_maid_report": True   # 可选标记，方便以后过滤
+            })
+
+            # 3. 保存到 chat_history.json
+            history_manager.save(history_dict)
+
+            # 4. 强制触发 main_process，让 Yuki 自然思考并决定是否回复
+            #    （main_process 会读取最新历史、检索 RAG、决定是否发言等）
+            if engine.process_callback is not None:
+                asyncio.create_task(
+                    engine.process_callback(chat_id, mode, debounce_flag=False,force_reply=True)
+                )
+                print(f"🚀 已通过 process_callback 触发 main_process (chat_id: {chat_id})")
+            else:
+                print(f"⚠️ process_callback 未设置，无法触发回复流程")
+
+            print(f"🚀 已将小女仆汇报交还给 main_process，强制触发回复流程 (chat_id: {chat_id})")
+
+        except Exception as e:
+            print(f"❌ 处理小女仆汇报时出错: {e}")
+
+        finally:
+            yuki_state.maid_task_queue.task_done()
