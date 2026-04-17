@@ -24,7 +24,7 @@ IMAGE_PROCESS_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/
 BACKUP_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
 # IMAGE_PROCESS_API_KEY = os.getenv("IMAGE_PROCESS_API_KEY", "").strip()
-IMAGE_PROCESS_API_KEY = "sk-780c39897d9242edb5efe4fe3799974b"
+IMAGE_PROCESS_API_KEY = ""
 MASTER_NAME = os.getenv("MASTER_NAME", "主人") # 默认叫主人，也可以改
 
 # 主对话模型 (例如: deepseek-chat, gpt-4o)
