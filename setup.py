@@ -4,6 +4,15 @@ import subprocess
 import sys
 from dotenv import load_dotenv, set_key
 
+# uv 环境提示：如果检测到 uv 但未在虚拟环境中运行，给出友好提示
+if shutil.which("uv") and sys.prefix == sys.base_prefix:
+    venv_python = os.path.join(".venv", "Scripts", "python.exe") if sys.platform == "win32" else os.path.join(".venv", "bin", "python")
+    if os.path.exists(venv_python):
+        print("💡 检测到 uv 虚拟环境存在，但未激活。")
+        print("   请使用以下命令运行 setup.py：")
+        print(f"   uv run python setup.py")
+        print("   或先激活虚拟环境后再运行。\n")
+
 def ensure_dirs():
     """确保必要的文件夹存在"""
     dirs = ["./models", "./data", "./yuki_memory", "./logs"]
@@ -116,10 +125,12 @@ def quick_setup(mode):
 
     # 2. 配置 RAG 嵌入模型
     print("\n>>> 步骤 5: 下载 RAG 嵌入模型")
-    print("正在加载程序")
-    from utils.download_model import download_model
     try:
+        from utils.download_model import download_model
         download_model()
+    except ImportError as e:
+        print(f"⚠️ 依赖未安装，跳过模型下载: {e}")
+        print("   请确保已运行 'uv sync' 或 'pip install -r requirements.txt'")
     except Exception as e:
         print(f"❌ 模型下载环节出现问题: {e}")
 
