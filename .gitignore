@@ -9,3 +9,6 @@ data/
 project_for_ai.txt
 models.zip
 skills/
+core/skills
+logs/
+core/tasks
