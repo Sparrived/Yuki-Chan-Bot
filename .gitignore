@@ -12,4 +12,5 @@ skills/
 core/skills
 logs/
 core/tasks
+configs/config.yaml
 .venv/

@@ -24,16 +24,16 @@ real_time_debounce_time = DEBOUNCE_TIME
 
 def check_config():
     """在启动前进行最后的物理检查"""
-    if not os.path.exists(".env"):
+    if not os.path.exists("configs/config.yaml"):
         env_choice = input("检测到尚未进行基础配置，是否现在运行配置向导？(y/n): ")
         if env_choice.lower() == 'y':
             from setup import quick_setup
             quick_setup(0)  # 以刷新模式运行
         else:
-            logger.warning("请手动运行 python quick_setup.py 后再启动。")
+            logger.warning("请手动运行 python setup.py 后再启动。")
             sys.exit(0)
 
-    required_files = [".env", "blacklist.txt", "./models/text2vec-base-chinese/config.json"]
+    required_files = ["configs/config.yaml", "blacklist.txt", "./models/text2vec-base-chinese/config.json"]
     for f in required_files:
         if not os.path.exists(f):
             # 抛出异常，触发下面的错误引导

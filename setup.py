@@ -2,7 +2,6 @@ import os
 import shutil
 import subprocess
 import sys
-from dotenv import load_dotenv, set_key
 
 # uv 环境提示：如果检测到 uv 但未在虚拟环境中运行，给出友好提示
 if shutil.which("uv") and sys.prefix == sys.base_prefix:
@@ -26,19 +25,138 @@ def ensure_files():
     # 1. 自动生成初始黑名单
     if not os.path.exists("blacklist.txt"):
         with open("blacklist.txt", "w", encoding="utf-8") as f:
-            # 写入你之前文件里提到的默认过滤词
             f.write("yuki\n主人\n哥哥\n池宇健\n人家")
         print("已生成初始 blacklist.txt")
     else:
         print("📝 已存在 blacklist.txt，跳过")
 
-    # 2. 自动生成 .gitignore 防止误传密钥
+    # 2. 自动生成 .gitignore
+    gitignore_content = """.idea/
+.env
+.vscode/
+__pycache__/
+yuki_memory/
+models/
+data/
+project_for_ai.txt
+models.zip
+skills/
+core/skills
+logs/
+core/tasks
+configs/config.yaml
+.venv/
+"""
     if not os.path.exists(".gitignore"):
         with open(".gitignore", "w", encoding="utf-8") as f:
-            f.write(".env\n__pycache__/\n*.log\nmodels/\n/yuki_memory/\n.vscode/")
-        print("🛡️ 已生成 .gitignore（保护你的 API Key）")
+            f.write(gitignore_content)
+        print("🛡️ 已生成 .gitignore")
     else:
-        print("已存在 blacklist.txt，跳过")
+        with open(".gitignore", "r", encoding="utf-8") as f:
+            existing = f.read()
+        if "configs/config.yaml" not in existing:
+            with open(".gitignore", "a", encoding="utf-8") as f:
+                f.write("\nconfigs/config.yaml\n")
+            print("🛡️ 已追加 configs/config.yaml 到 .gitignore")
+        else:
+            print("已存在 .gitignore，跳过")
+
+    # 3. 自动生成初始 configs/config.yaml
+    os.makedirs("configs", exist_ok=True)
+    if not os.path.exists("configs/config.yaml"):
+        default_config = '''# Yuki-Chan Bot 配置文件
+# 所有配置均在此文件管理，请勿提交到 Git
+# 本文件已在 .gitignore 中
+
+# ================= 机器人身份 =================
+robot_name: "yuki"
+master_name: "主人"
+
+# ================= 安全配置 =================
+max_message_length: 150                # 单条消息最大长度，防止 token 炸弹
+
+# ================= API 配置 =================
+api:
+  llm_base_url: "https://api.deepseek.com/v1"
+  deepseek_base_url: "https://api.deepseek.com/v1"
+  image_process_url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+  llm_api_key: ""                      # 首选 LLM API Key
+  backup_api_key: ""                   # 备选 API Key（留空则使用 llm_api_key）
+  image_process_api_key: ""            # 图像处理 API Key
+
+# ================= 模型配置 =================
+model:
+  llm: "deepseek-chat"                 # 主对话模型
+  backup: "deepseek-chat"              # 备用对话模型
+  vision: "qwen3-vl-flash"             # 视觉/多模态模型；如不需要可留空 ""
+
+# ================= 连接配置 =================
+connection:
+  napcat_ws_url: "ws://127.0.0.1:3001"
+  max_retries: 3
+
+# ================= 目标配置 =================
+target:
+  qq: 0                                # 私聊目标 QQ 号
+  groups: []                           # 目标群聊 QQ 号列表，如 [123456, 789012]
+
+# ================= 日记触发配置 =================
+diary:
+  idle_seconds: 120                    # 空闲多久后触发日记（秒）
+  min_turns: 15                        # 最小对话轮数阈值
+  max_length: 50                       # 历史记录超过此条数强制写日记
+
+# ================= RAG 记忆配置 =================
+rag:
+  retrieval_top_k: 20                  # 检索返回的最大日记条数
+  keep_last_dialogue: 10               # 保留的近期对话条数（短期记忆）
+
+# ================= 本地文件路径配置 =================
+# 均为相对项目根目录的路径
+paths:
+  vector_db: "./yuki_memory"
+  embed_model: "./models/text2vec-base-chinese"
+  history_file: "./data/chat_history.json"
+  log_file: "./data/yuki_log.txt"
+  cache_dir: "./data"
+  cache_file: "./data/meme_cache.json"
+
+# ================= 时间/超时配置 =================
+timing:
+  debounce_time: 32                    # 防抖时间（秒）
+  request_timeout:
+    total: 60
+    connect: 10
+    sock_read: 30
+
+# ================= 精力值系统配置 =================
+energy:
+  initial: 100
+  max: 100.0
+  recovery_per_min: 0.8
+  cost_per_reply: 6
+  min_active: 25                       # 低于此值进入低活跃状态
+
+# ================= 注意力/响应配置 =================
+attention:
+  sensitivity: 0.12
+  decay_level: 0.65
+  sigmoid_centre: 50.0
+  sigmoid_alpha: 0.08
+  # 以下关键词会在运行时被追加 ROBOT_NAME，无需手动修改
+  keywords:
+    - "主人"
+    - "哥哥"
+
+# ================= 并发与调试配置 =================
+max_concurrent_meme: 3
+debug: true
+'''
+        with open("configs/config.yaml", "w", encoding="utf-8") as f:
+            f.write(default_config)
+        print("📄 已生成初始 configs/config.yaml")
+    else:
+        print("📄 已存在 configs/config.yaml，跳过")
 
 def install_requirements():
     """自动安装依赖（优先使用 uv，回退到 pip）"""
@@ -59,51 +177,167 @@ def install_requirements():
         print(f"❌ 依赖安装失败\n错误: {e}")
         print("💡 建议手动执行: uv sync  或  pip install -r requirements.txt")
 
-def config_env_key(mode):
+def migrate_from_env():
+    """将 .env 中的配置自动迁移到 configs/config.yaml（仅迁移 yaml 中缺失的值）"""
     env_path = ".env"
     if not os.path.exists(env_path):
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.write("# Yuki-Chan Configuration\n")
+        return False
 
-    keys_to_configure = [
-        ("LLM_API_KEY", "请输入首选 LLM API Key: ", ""),
-        ("BACKUP_API_KEY", "请输入备选 LLM API Key: （未选择的话可以继续用上面的）", ""),
-        ("IMAGE_PROCESS_API_KEY", "请输入 图像处理 API Key: ", ""),
-        ("NAPCAT_WS_URL", "请输入 NapCat WebSocket 地址 (默认: ws://127.0.0.1:3001): ", "ws://127.0.0.1:3001")
+    try:
+        import yaml
+    except ImportError:
+        print("⚠️ PyYAML 未安装，跳过 .env 迁移。建议先安装依赖后再运行 setup.py")
+        return False
+
+    # 解析 .env
+    env_data = {}
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            env_data[key.strip()] = value.strip().strip('"').strip("'")
+
+    if not env_data:
+        return False
+
+    cfg = _load_yaml()
+    migrated = []
+
+    # 1. API Keys
+    api = cfg.setdefault("api", {})
+    key_map = {
+        "LLM_API_KEY": "llm_api_key",
+        "BACKUP_API_KEY": "backup_api_key",
+        "IMAGE_PROCESS_API_KEY": "image_process_api_key",
+    }
+    for env_key, yaml_key in key_map.items():
+        val = env_data.get(env_key)
+        if val and not api.get(yaml_key):
+            api[yaml_key] = val
+            migrated.append(f"api.{yaml_key}")
+
+    # DEEPSEEK_API_KEY 作为 backup_api_key 的兜底迁移
+    if not api.get("backup_api_key") and env_data.get("DEEPSEEK_API_KEY"):
+        api["backup_api_key"] = env_data["DEEPSEEK_API_KEY"]
+        migrated.append("api.backup_api_key (from DEEPSEEK_API_KEY)")
+
+    # 2. 连接配置
+    connection = cfg.setdefault("connection", {})
+    if env_data.get("NAPCAT_WS_URL") and not connection.get("napcat_ws_url"):
+        connection["napcat_ws_url"] = env_data["NAPCAT_WS_URL"]
+        migrated.append("connection.napcat_ws_url")
+
+    # 3. 机器人身份（允许覆盖默认值，因为旧版 setup.py 中这些值通常是用户自定义的）
+    if env_data.get("ROBOT_NAME"):
+        cfg["robot_name"] = env_data["ROBOT_NAME"]
+        migrated.append("robot_name")
+    if env_data.get("MASTER_NAME"):
+        cfg["master_name"] = env_data["MASTER_NAME"]
+        migrated.append("master_name")
+
+    # 4. 目标 QQ
+    target = cfg.setdefault("target", {})
+    if env_data.get("TARGET_QQ") and not target.get("qq"):
+        try:
+            target["qq"] = int(env_data["TARGET_QQ"])
+            migrated.append("target.qq")
+        except ValueError:
+            pass
+
+    if env_data.get("TARGET_GROUPS") and not target.get("groups"):
+        try:
+            groups = [int(g.strip()) for g in env_data["TARGET_GROUPS"].split(",") if g.strip()]
+            target["groups"] = groups
+            migrated.append("target.groups")
+        except ValueError:
+            pass
+
+    if migrated:
+        _save_yaml(cfg)
+        print(f"[迁移] 检测到 .env 文件，已自动迁移 {len(migrated)} 项配置到 configs/config.yaml:")
+        for item in migrated:
+            print(f"   - {item}")
+        print("   (.env 文件已保留，可作为备份)")
+        return True
+    return False
+
+def _load_yaml():
+    import yaml
+    path = "configs/config.yaml"
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+def _save_yaml(data):
+    import yaml
+    path = "configs/config.yaml"
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+def config_yaml(mode):
+    """交互式配置 configs/config.yaml"""
+    try:
+        import yaml
+    except ImportError:
+        print("⚠️ PyYAML 未安装，无法自动修改 configs/config.yaml")
+        print("   请先安装依赖，或手动编辑 configs/config.yaml")
+        return
+
+    cfg = _load_yaml()
+    changed = False
+
+    # 1. API Keys
+    print("\n--- 配置 API 密钥 ---")
+    api = cfg.setdefault("api", {})
+    keys = [
+        ("llm_api_key", "请输入首选 LLM API Key: "),
+        ("backup_api_key", "请输入备选 LLM API Key（不需要可留空）: "),
+        ("image_process_api_key", "请输入图像处理 API Key: "),
     ]
-
-    for key, prompt, default in keys_to_configure:
-        load_dotenv()
-        if mode == 1 or not os.getenv(key):
-            value = input(prompt).strip()
-            save_value = value if value else default
-            if save_value:
-                set_key(env_path, key, save_value)
-                print(f"{key} 已保存: {save_value}")
-        else:
-            print(f"{key} 已存在，跳过(模式: 刷新)")
-
-
-def config_bot_settings(mode):
-    """配置机器人身份及目标对话对象"""
-    env_path = ".env"
-    settings = [
-        ("ROBOT_NAME", "给BOT起个名字吧："),
-        ("MASTER_NAME", "希望BOT称呼你的名字："),
-        ("TARGET_QQ", "请输入私聊用 QQ 号: "),
-        ("TARGET_GROUPS", "请输入目标群聊 QQ 号 (多个用逗号隔开): ")
-    ]
-
-    for key, prompt in settings:
-        load_dotenv()
-        # 修改点：同上
-        if mode == 1 or not os.getenv(key):
+    for key, prompt in keys:
+        if mode == 1 or not api.get(key):
             value = input(prompt).strip()
             if value:
-                set_key(env_path, key, value)
-                print(f"{key} 已设置")
+                api[key] = value
+                changed = True
+                print(f"  ✓ api.{key} 已设置")
+            elif mode == 1 and key in api:
+                del api[key]
+                changed = True
         else:
-            print(f"{key} 已存在，跳过")
+            print(f"  api.{key} 已存在，跳过")
+
+    # 2. 目标 QQ
+    print("\n--- 配置目标 QQ ---")
+    target = cfg.setdefault("target", {})
+    settings = [
+        ("qq", "请输入私聊用 QQ 号: ", int),
+        ("groups", "请输入目标群聊 QQ 号 (多个用逗号隔开，不需要可留空): ", None),
+    ]
+    for key, prompt, cast in settings:
+        if mode == 1 or not target.get(key):
+            value = input(prompt).strip()
+            if value:
+                if key == "groups":
+                    target[key] = [int(g.strip()) for g in value.split(",") if g.strip()]
+                else:
+                    target[key] = int(value) if cast == int else value
+                changed = True
+                print(f"  ✓ target.{key} 已设置")
+            elif mode == 1 and key in target:
+                del target[key]
+                changed = True
+        else:
+            print(f"  target.{key} 已存在，跳过")
+
+    if changed:
+        _save_yaml(cfg)
+        print("\n📄 配置已保存到 configs/config.yaml")
+    else:
+        print("\n配置无变化")
 
 def quick_setup(mode):
     print("\n>>> 步骤 1: 建立文件夹结构")
@@ -111,18 +345,18 @@ def quick_setup(mode):
     ensure_files()
     # 建立黑名单等必要文件
     if not os.path.exists("blacklist.txt"):
-        with open("blacklist.txt", "w", encoding="utf-8") as f: f.write("")
+        with open("blacklist.txt", "w", encoding="utf-8") as f:
+            f.write("")
 
     print("\n>>> 步骤 2: 安装依赖文件")
     install_requirements()
 
-    print("\n>>> 步骤 3: 配置 API 密钥")
-    config_env_key(mode)
+    print("\n>>> 步骤 3: 迁移旧版 .env 配置(如有)")
+    migrate_from_env()
 
-    print("\n>>> 步骤 4: 配置机器人 QQ 号")
-    config_bot_settings(mode)
+    print("\n>>> 步骤 4: 配置 API 密钥与 QQ 号")
+    config_yaml(mode)
 
-    # 2. 配置 RAG 嵌入模型
     print("\n>>> 步骤 5: 下载 RAG 嵌入模型")
     try:
         from utils.download_model import download_model
@@ -144,4 +378,4 @@ if __name__ == "__main__":
 
     quick_setup(current_mode)
 
-    print("向导结束，请到config.py文件中手动修改使用模型名称和请求地址！")
+    print("向导结束，如需调整参数，请编辑 configs/config.yaml！")
