@@ -2,6 +2,8 @@ import os
 import shutil
 import subprocess
 import sys
+from config import _add_inline_comments, generate_default_config
+import yaml
 
 # uv 环境提示：如果检测到 uv 但未在虚拟环境中运行，给出友好提示
 if shutil.which("uv") and sys.prefix == sys.base_prefix:
@@ -61,54 +63,30 @@ configs/config.yaml
         else:
             print("已存在 .gitignore，跳过")
 
-    # 3. 自动生成/升级 configs/config.yaml
-    os.makedirs("configs", exist_ok=True)
-    config_path = "configs/config.yaml"
-    if not os.path.exists(config_path):
-        from config import generate_default_config
-        default_config = generate_default_config()
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(default_config)
-        print("[Config] 已生成初始 configs/config.yaml")
-    else:
-        with open(config_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        if "# Yuki-Chan Bot" not in content:
-            # 旧文件无注释，升级：保留现有值，重新生成带注释版本
-            import yaml
-            import re
-            old_cfg = yaml.safe_load(content) or {}
-            from config import generate_default_config
-            new_content = generate_default_config()
+        # 3. 自动生成/升级 configs/config.yaml
+        os.makedirs("configs", exist_ok=True)
+        config_path = "configs/config.yaml"
 
-            def _inject(data, prefix=""):
-                nonlocal new_content
-                for k, v in data.items():
-                    if isinstance(v, dict):
-                        _inject(v, f"{prefix}.{k}" if prefix else k)
-                    else:
-                        val_yaml = yaml.dump({k: v}, default_flow_style=False, sort_keys=False).strip()
-                        _, val_part = val_yaml.split(":", 1)
-                        val_part = val_part.strip()
-                        pattern = rf"^(\s*{re.escape(k)}:[ \t]*)([^\n#]*?)((?:[ \t]*#.*)?)$"
-                        new_content = re.sub(
-                            pattern,
-                            lambda m: f"{m.group(1).rstrip(' \t')} {val_part}{m.group(3)}",
-                            new_content,
-                            flags=re.MULTILINE,
-                            count=1
-                        )
 
-            _inject(old_cfg)
-            # 备份旧文件
-            with open(config_path + ".old", "w", encoding="utf-8") as f:
-                f.write(content)
+        if not os.path.exists(config_path):
             with open(config_path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-            print("[Config] 已升级 configs/config.yaml，添加注释并保留原有配置（旧文件已备份为 .old）")
+                f.write(generate_default_config())
+            print("[Config] 已生成初始 configs/config.yaml")
         else:
-            print("[Config] 已存在 configs/config.yaml，跳过")
-
+            with open(config_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            if "# Yuki-Chan Bot" not in content:
+                # 这是一个旧格式文件，我们进行“结构化升级”
+                old_data = _load_yaml()
+                # 备份
+                shutil.copy(config_path, config_path + ".old")
+                # 直接用新模板覆盖，然后调用我们下方的 _save_yaml 把旧数据刷进去
+                with open(config_path, "w", encoding="utf-8") as f:
+                    f.write(generate_default_config())
+                _save_yaml(old_data)
+                print("[Config] 已将旧版配置升级为带注释的新格式，旧文件已备份为 .old")
+            else:
+                print("[Config] 已存在 configs/config.yaml，跳过")
 def install_requirements():
     """自动安装依赖（优先使用 uv，回退到 pip）"""
     if input("\n是否现在安装/更新依赖插件? (y/n): ").lower() != 'y':
@@ -128,91 +106,60 @@ def install_requirements():
         print(f"❌ 依赖安装失败\n错误: {e}")
         print("💡 建议手动执行: uv sync  或  pip install -r requirements.txt")
 
+
 def migrate_from_env():
-    """将 .env 中的配置自动迁移到 configs/config.yaml（仅迁移 yaml 中缺失的值）"""
+    """手动解析 .env 文件并强制迁移空值"""
+    from config import _ATTR_MAP
+
     env_path = ".env"
     if not os.path.exists(env_path):
-        return False
+        return
 
-    try:
-        import yaml
-    except ImportError:
-        print("⚠️ PyYAML 未安装，跳过 .env 迁移。建议先安装依赖后再运行 setup.py")
-        return False
-
-    # 解析 .env
+    # 手动简单解析 .env (避免依赖第三方库)
     env_data = {}
     with open(env_path, "r", encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            env_data[key.strip()] = value.strip().strip('"').strip("'")
-
-    if not env_data:
-        return False
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                env_data[k.strip()] = v.strip().strip('"').strip("'")
 
     cfg = _load_yaml()
-    migrated = []
+    migrated_count = 0
 
-    # 1. API Keys
-    api = cfg.setdefault("api", {})
-    key_map = {
-        "LLM_API_KEY": "llm_api_key",
-        "BACKUP_API_KEY": "backup_api_key",
-        "IMAGE_PROCESS_API_KEY": "image_process_api_key",
+    # 映射表
+    mapping = {
+        "LLM_API_KEY": ("api", "llm_api_key"),
+        "IMAGE_PROCESS_API_KEY": ("api", "image_process_api_key"),
+        "TARGET_QQ": ("target", "qq"),
+        "TARGET_GROUPS": ("target", "groups"),
     }
-    for env_key, yaml_key in key_map.items():
+
+    def set_nested(data, path, value):
+        curr = data
+        for key in path[:-1]:
+            curr = curr.setdefault(key, {})
+        curr[path[-1]] = value
+
+    for env_key, yaml_path in mapping.items():
         val = env_data.get(env_key)
-        if val and not api.get(yaml_key):
-            api[yaml_key] = val
-            migrated.append(f"api.{yaml_key}")
+        if val:
+            # 只有当 yaml 里没值或者是默认空字符串时，才覆盖
+            current_val = cfg
+            for p in yaml_path: current_val = current_val.get(p, {}) if isinstance(current_val, dict) else None
 
-    # DEEPSEEK_API_KEY 作为 backup_api_key 的兜底迁移
-    if not api.get("backup_api_key") and env_data.get("DEEPSEEK_API_KEY"):
-        api["backup_api_key"] = env_data["DEEPSEEK_API_KEY"]
-        migrated.append("api.backup_api_key (from DEEPSEEK_API_KEY)")
+            if not current_val or current_val == "":
+                # 类型转换
+                if env_key == "TARGET_QQ": val = int(val)
+                if env_key == "TARGET_GROUPS": val = [int(x.strip()) for x in val.split(",") if x.strip()]
 
-    # 2. 连接配置
-    connection = cfg.setdefault("connection", {})
-    if env_data.get("NAPCAT_WS_URL") and not connection.get("napcat_ws_url"):
-        connection["napcat_ws_url"] = env_data["NAPCAT_WS_URL"]
-        migrated.append("connection.napcat_ws_url")
+                set_nested(cfg, yaml_path, val)
+                print(f"  - [已迁移] {env_key} -> {'.'.join(yaml_path)}")
+                migrated_count += 1
 
-    # 3. 机器人身份（允许覆盖默认值，因为旧版 setup.py 中这些值通常是用户自定义的）
-    if env_data.get("ROBOT_NAME"):
-        cfg["robot_name"] = env_data["ROBOT_NAME"]
-        migrated.append("robot_name")
-    if env_data.get("MASTER_NAME"):
-        cfg["master_name"] = env_data["MASTER_NAME"]
-        migrated.append("master_name")
-
-    # 4. 目标 QQ
-    target = cfg.setdefault("target", {})
-    if env_data.get("TARGET_QQ") and not target.get("qq"):
-        try:
-            target["qq"] = int(env_data["TARGET_QQ"])
-            migrated.append("target.qq")
-        except ValueError:
-            pass
-
-    if env_data.get("TARGET_GROUPS") and not target.get("groups"):
-        try:
-            groups = [int(g.strip()) for g in env_data["TARGET_GROUPS"].split(",") if g.strip()]
-            target["groups"] = groups
-            migrated.append("target.groups")
-        except ValueError:
-            pass
-
-    if migrated:
+    if migrated_count > 0:
         _save_yaml(cfg)
-        print(f"[迁移] 检测到 .env 文件，已自动迁移 {len(migrated)} 项配置到 configs/config.yaml:")
-        for item in migrated:
-            print(f"   - {item}")
-        print("   (.env 文件已保留，可作为备份)")
-        return True
-    return False
+        print(f"✅ 成功从 .env 同步了 {migrated_count} 项配置")
+
 
 def _load_yaml():
     import yaml
@@ -222,145 +169,94 @@ def _load_yaml():
             return yaml.safe_load(f) or {}
     return {}
 
+
 def _save_yaml(data):
-    """保存 yaml，尽可能保留现有注释（只替换变更的值）"""
-    import yaml
-    import re
-    path = "configs/config.yaml"
+    """
+    开发者方案：利用 config.py 的模板生成技术写回。
+    """
+    # 确保从 config.py 导入必要的常量和格式化函数
 
-    if not os.path.exists(path):
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-        return
 
-    with open(path, "r", encoding="utf-8") as f:
-        original = f.read()
+    # 1. 加载当前物理文件内容作为基准 (调用 setup.py 里的 _load_yaml)
+    current_cfg = _load_yaml()
 
-    def _replace_values(d, indent=0):
-        nonlocal original
-        spaces = "  " * indent
-        for k, v in d.items():
-            if isinstance(v, dict):
-                _replace_values(v, indent + 1)
+    # 2. 递归合并新数据到 current_cfg
+    def deep_update(base, updater):
+        for k, v in updater.items():
+            if isinstance(v, dict) and k in base and isinstance(base[k], dict):
+                deep_update(base[k], v)
             else:
-                # 生成 yaml 格式的值字符串
-                if isinstance(v, list):
-                    # 列表直接用流式风格 [a, b]
-                    val_part = yaml.dump(v, allow_unicode=True, default_flow_style=True).strip()
-                else:
-                    val_yaml = yaml.dump({k: v}, allow_unicode=True, default_flow_style=False, sort_keys=False).strip()
-                    _, val_part = val_yaml.split(":", 1)
-                    val_part = val_part.strip()
+                base[k] = v
 
-                # 匹配并替换（保留行尾注释）
-                # 使用 [ \t]* 替代 \s*，防止 \s 跨过换行符匹配下一行
-                pattern = rf"^({spaces}{re.escape(k)}:[ \t]*)([^\n#]*?)((?:[ \t]*#.*)?)$"
-                new_original = re.sub(
-                    pattern,
-                    lambda m: f"{m.group(1).rstrip(' \t')} {val_part}{m.group(3)}",
-                    original,
-                    flags=re.MULTILINE,
-                    count=1
-                )
-                if new_original != original:
-                    original = new_original
-                    # 如果是列表，删除后续残留的块样式列表项（- 开头且缩进相同的行）
-                    if isinstance(v, list):
-                        lines = original.split("\n")
-                        result = []
-                        found_key = False
-                        for line in lines:
-                            if found_key:
-                                # 遇到缩进小于当前层级的行，停止删除
-                                if line and not line.startswith(spaces) and not line.startswith(spaces + "-"):
-                                    found_key = False
-                                    result.append(line)
-                                    continue
-                                # 跳过残留的列表项和空行
-                                if line.startswith(spaces + "-") or (line.strip() == "" and result and result[-1].startswith(spaces + "-")):
-                                    continue
-                                result.append(line)
-                            else:
-                                if line.startswith(f"{spaces}{k}:"):
-                                    found_key = True
-                                result.append(line)
-                        original = "\n".join(result)
-                else:
-                    # 键不存在。嵌套键追加到文件末尾会产生无效 YAML（缺少父节点），
-                    # 因此仅顶层键允许兜底追加；嵌套键缺失说明配置文件不完整。
-                    if indent == 0:
-                        original += f"\n{spaces}{k}: {val_part}"
-                    else:
-                        print(f"⚠️  configs/config.yaml 中缺少 '{k}'（位于嵌套层级 {indent}），跳过追加。"
-                              f"建议删除 config.yaml 后重新运行 setup.py 生成完整配置。")
+    deep_update(current_cfg, data)
 
-    _replace_values(data)
+    # 3. 重新生成带注释的文本
+    # 注意：这里使用 yaml.dump 生成纯文本，再通过 config.py 里的 _add_inline_comments 补全注释
+    raw_yaml = yaml.dump(
+        current_cfg,
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False
+    )
+    # 调用 config.py 里的函数来美化并添加注释
+    final_content = _add_inline_comments(raw_yaml)
 
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(original)
+    # 添加文件头
+    header = "# Yuki-Chan Bot 配置文件\n# 所有配置均在此文件管理，请勿提交到 Git\n# 本文件已在 .gitignore 中\n\n"
+
+    with open("configs/config.yaml", "w", encoding="utf-8") as f:
+        f.write(header + final_content)
 
 def config_yaml(mode):
-    """交互式配置 configs/config.yaml"""
-    try:
-        import yaml
-    except ImportError:
-        print("⚠️ PyYAML 未安装，无法自动修改 configs/config.yaml")
-        print("   请先安装依赖，或手动编辑 configs/config.yaml")
-        return
-
+    """配置 API Key 和 QQ 号，完全弃用正则，改为直接操作对象"""
     cfg = _load_yaml()
     changed = False
 
-    # 1. API Keys
     print("\n--- 配置 API 密钥 ---")
-    api = cfg.setdefault("api", {})
-    keys = [
-        ("llm_api_key", "请输入首选 LLM API Key: "),
-        ("backup_api_key", "请输入备选 LLM API Key（不需要可留空）: "),
-        ("image_process_api_key", "请输入图像处理 API Key: "),
+    # 定义需要交互配置的项 (提示语, path)
+    prompts = [
+        ("请输入首选 LLM API Key: ", ("api", "llm_api_key")),
+        ("请输入备选 LLM API Key（留空跳过）: ", ("api", "backup_api_key")),
+        ("请输入图像处理 API Key: ", ("api", "image_process_api_key")),
     ]
-    for key, prompt in keys:
-        if mode == 1 or not api.get(key):
-            value = input(prompt).strip()
-            if value:
-                api[key] = value
-                changed = True
-                print(f"  ✓ api.{key} 已设置")
-            elif mode == 1 and key in api:
-                del api[key]
-                changed = True
-        else:
-            print(f"  api.{key} 已存在，跳过")
 
-    # 2. 目标 QQ
+    def set_nested(data, path, value):
+        curr = data
+        for key in path[:-1]:
+            curr = curr.setdefault(key, {})
+        curr[path[-1]] = value
+
+    for msg, path in prompts:
+        val = input(msg).strip()
+        if val:
+            set_nested(cfg, path, val)
+            changed = True
+            print(f"  ✓ {'.'.join(path)} 已设置")
+
     print("\n--- 配置目标 QQ ---")
-    target = cfg.setdefault("target", {})
-    settings = [
-        ("qq", "请输入私聊用 QQ 号: ", int),
-        ("groups", "请输入目标群聊 QQ 号 (多个用逗号隔开，不需要可留空): ", None),
-    ]
-    for key, prompt, cast in settings:
-        if mode == 1 or not target.get(key):
-            value = input(prompt).strip()
-            if value:
-                if key == "groups":
-                    target[key] = [int(g.strip()) for g in value.split(",") if g.strip()]
-                else:
-                    target[key] = int(value) if cast == int else value
-                changed = True
-                print(f"  ✓ target.{key} 已设置")
-            elif mode == 1 and key in target:
-                del target[key]
-                changed = True
-        else:
-            print(f"  target.{key} 已存在，跳过")
+    # QQ 号配置逻辑
+    qq_val = input("请输入私聊用 QQ 号: ").strip()
+    if qq_val:
+        try:
+            set_nested(cfg, ("target", "qq"), int(qq_val))
+            changed = True
+            print("  ✓ target.qq 已设置")
+        except: print("  ❌ QQ 号格式错误，跳过")
+
+    group_val = input("请输入目标群聊 (多个用逗号隔开): ").strip()
+    if group_val:
+        try:
+            groups = [int(x.strip()) for x in group_val.split(",") if x.strip()]
+            set_nested(cfg, ("target", "groups"), groups)
+            changed = True
+            print("  ✓ target.groups 已设置")
+        except: print("  ❌ 群号格式错误，跳过")
 
     if changed:
         _save_yaml(cfg)
-        print("\n📄 配置已保存到 configs/config.yaml")
+        print("\n📄 配置已成功保存到 configs/config.yaml")
     else:
-        print("\n配置无变化")
-
+        print("\n保持原有配置不变。")
 def quick_setup(mode):
     print("\n>>> 步骤 1: 建立文件夹结构")
     ensure_dirs()
