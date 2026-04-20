@@ -44,7 +44,8 @@ _ATTR_MAP = {
     "MAX_RETRIES":   (("connection", "max_retries"), 3, "最大重试次数"),
 
     # 目标
-    "TARGET_QQ": (("target", "qq"), 0, "私聊目标 QQ 号"),
+    "TARGET_QQ":     (("target", "qq"), 0, "私聊目标 QQ 号"),
+    "TARGET_GROUPS": (("target", "groups"), [], "目标群聊 QQ 号列表"),
 
     # 时间
     "DEBOUNCE_TIME": (("timing", "debounce_time"), 32, "防抖时间（秒）"),
@@ -100,6 +101,7 @@ class Config:
         self._path = os.path.join(BASE_DIR, "configs", "config.yaml")
         self._raw = {}
         self._content_hash = ""
+        self._last_good_content = ""
         self._last_check = 0
         self.reload()
 
@@ -118,7 +120,7 @@ class Config:
         self._auto_fill()
 
     def _auto_fill(self):
-        """自动将 _ATTR_MAP 中缺失的字段补全到 yaml（不覆盖已有值）"""
+        """自动将 _ATTR_MAP 中缺失的字段补全到内存中的 _raw（不覆盖已有值，不写磁盘）"""
         added = []
         for name, (path, default, comment) in _ATTR_MAP.items():
             d = self._raw
@@ -138,8 +140,8 @@ class Config:
                 d[path[-1]] = default
                 added.append(".".join(path))
         if added:
-            self._save_raw()
-            logger.info(f"[Config] 已自动补全 {len(added)} 个缺失字段到 configs/config.yaml: {', '.join(added)}")
+            # 仅更新内存，不写入磁盘，避免覆盖用户注释
+            logger.info(f"[Config] 已自动补全 {len(added)} 个缺失字段（仅内存）: {', '.join(added)}")
 
     def _save_raw(self):
         """将当前 _raw 写回 configs/config.yaml"""
@@ -163,12 +165,18 @@ class Config:
             if is_first_load:
                 logger.error(f"[Config] 配置文件解析失败，已备份到 {os.path.basename(bak_path)}: {e}")
                 raise RuntimeError(f"配置文件 {self._path} 解析失败") from e
-            # 运行时自愈：恢复原配置
-            self._save_raw()
-            logger.warning(f"[Config] 配置文件解析失败，已备份到 {os.path.basename(bak_path)} 并恢复原配置: {e}")
+            # 运行时自愈：恢复上一个已知的好的文件内容（保留注释）
+            if self._last_good_content:
+                with open(self._path, "w", encoding="utf-8") as f:
+                    f.write(self._last_good_content)
+                logger.warning(f"[Config] 配置文件解析失败，已备份到 {os.path.basename(bak_path)} 并恢复原文: {e}")
+            else:
+                self._save_raw()
+                logger.warning(f"[Config] 配置文件解析失败，已备份到 {os.path.basename(bak_path)} 并恢复默认配置: {e}")
             return False
         self._content_hash = new_hash
         self._raw = new_raw
+        self._last_good_content = content
         return True
 
     @staticmethod

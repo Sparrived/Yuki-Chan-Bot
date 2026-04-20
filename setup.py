@@ -12,19 +12,6 @@ if shutil.which("uv") and sys.prefix == sys.base_prefix:
         print(f"   uv run python setup.py")
         print("   或先激活虚拟环境后再运行。\n")
 
-def hide_file(path):
-    """将指定文件设为隐藏（跨平台）"""
-    if not os.path.exists(path):
-        return
-    try:
-        if os.name == "nt":
-            import ctypes
-            ctypes.windll.kernel32.SetFileAttributesW(os.path.abspath(path), 0x02)
-        elif sys.platform == "darwin":
-            subprocess.run(["chflags", "hidden", path], check=False)
-    except Exception:
-        pass
-
 def ensure_dirs():
     """确保必要的文件夹存在"""
     dirs = ["./models", "./data", "./yuki_memory", "./logs"]
@@ -103,9 +90,14 @@ configs/config.yaml
                         val_yaml = yaml.dump({k: v}, default_flow_style=False, sort_keys=False).strip()
                         _, val_part = val_yaml.split(":", 1)
                         val_part = val_part.strip()
-                        pattern = rf"^(\s*{re.escape(k)}:\s*)([^\n#]*?)(\s*(?:#.*)?)$"
-                        replacement = rf"\g<1>{val_part}\g<3>"
-                        new_content = re.sub(pattern, replacement, new_content, flags=re.MULTILINE, count=1)
+                        pattern = rf"^(\s*{re.escape(k)}:[ \t]*)([^\n#]*?)((?:[ \t]*#.*)?)$"
+                        new_content = re.sub(
+                            pattern,
+                            lambda m: f"{m.group(1).rstrip(' \t')} {val_part}{m.group(3)}",
+                            new_content,
+                            flags=re.MULTILINE,
+                            count=1
+                        )
 
             _inject(old_cfg)
             # 备份旧文件
@@ -261,19 +253,46 @@ def _save_yaml(data):
                     val_part = val_part.strip()
 
                 # 匹配并替换（保留行尾注释）
-                pattern = rf"^({spaces}{re.escape(k)}:\s*)([^\n#]*?)(\s*(?:#.*)?)$"
+                # 使用 [ \t]* 替代 \s*，防止 \s 跨过换行符匹配下一行
+                pattern = rf"^({spaces}{re.escape(k)}:[ \t]*)([^\n#]*?)((?:[ \t]*#.*)?)$"
                 new_original = re.sub(
                     pattern,
-                    lambda m: f"{m.group(1)}{val_part}{m.group(3)}",
+                    lambda m: f"{m.group(1).rstrip(' \t')} {val_part}{m.group(3)}",
                     original,
                     flags=re.MULTILINE,
                     count=1
                 )
                 if new_original != original:
                     original = new_original
+                    # 如果是列表，删除后续残留的块样式列表项（- 开头且缩进相同的行）
+                    if isinstance(v, list):
+                        lines = original.split("\n")
+                        result = []
+                        found_key = False
+                        for line in lines:
+                            if found_key:
+                                # 遇到缩进小于当前层级的行，停止删除
+                                if line and not line.startswith(spaces) and not line.startswith(spaces + "-"):
+                                    found_key = False
+                                    result.append(line)
+                                    continue
+                                # 跳过残留的列表项和空行
+                                if line.startswith(spaces + "-") or (line.strip() == "" and result and result[-1].startswith(spaces + "-")):
+                                    continue
+                                result.append(line)
+                            else:
+                                if line.startswith(f"{spaces}{k}:"):
+                                    found_key = True
+                                result.append(line)
+                        original = "\n".join(result)
                 else:
-                    # 键不存在，追加到文件末尾（兜底）
-                    original += f"\n{spaces}{k}: {val_part}"
+                    # 键不存在。嵌套键追加到文件末尾会产生无效 YAML（缺少父节点），
+                    # 因此仅顶层键允许兜底追加；嵌套键缺失说明配置文件不完整。
+                    if indent == 0:
+                        original += f"\n{spaces}{k}: {val_part}"
+                    else:
+                        print(f"⚠️  configs/config.yaml 中缺少 '{k}'（位于嵌套层级 {indent}），跳过追加。"
+                              f"建议删除 config.yaml 后重新运行 setup.py 生成完整配置。")
 
     _replace_values(data)
 
