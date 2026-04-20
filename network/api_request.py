@@ -87,7 +87,7 @@ class ApiCall:
         if not self.is_degraded:
             # 给主线 15 秒窗口，超过不回就认为不可用
             success, result = await self._raw_post(
-                self.base_url, self.api_key, model, messages, 15, **kwargs
+                self.base_url, self.api_key, model, messages, 40, **kwargs
             )
 
             if success:
