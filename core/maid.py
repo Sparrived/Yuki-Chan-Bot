@@ -128,7 +128,7 @@ def write_skill(name, code):
     return f"技能 {name} 已保存。"
 
 
-def run_skill(name):
+async def run_skill(name):  # 1. 变为 async 函数
     path = os.path.join(SKILLS_DIR, f"{name}.py")
     if not os.path.exists(path):
         available = os.listdir(SKILLS_DIR)
@@ -136,31 +136,47 @@ def run_skill(name):
 
     try:
         import sys
-        # 修改点 1：增加 errors='replace' 防止编码错误导致线程崩溃
-        # 修改点 2：明确指定 encoding='utf-8'
-        result = subprocess.run(
-            [sys.executable, path],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=20
+        # 2. 使用异步子进程创建，避免阻塞整个事件循环
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
 
-        # 修改点 3：增加对 None 的安全检查
-        stdout_res = (result.stdout or "").strip()
-        stderr_res = (result.stderr or "").strip()
+        try:
+            # 程序外计时：Maid 盯着子进程，20秒不回就动手
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
+        except (asyncio.TimeoutError, asyncio.exceptions.TimeoutError):  # 修改这里
+            # 发现超时，物理抹除进程树
+            try:
+                # /F 强制终止，/T 终止子进程（如任务管理器窗口）
+                subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)],
+                               capture_output=True, check=False)
+            except:
+                process.kill()  # 最后的碎纸机
 
-        if result.returncode == 0:
+            await process.wait()  # 确保资源彻底回收
+            return "错误：执行超时（60s）。物理进程已被强制终止。请检查代码是出现否阻塞等问题"
+
+        # 尝试解码逻辑（保持你已有的多级解码）
+        def decode_output(output_bytes):
+            if not output_bytes: return ""
+            for enc in ['utf-8', 'gbk', 'cp936']:
+                try: return output_bytes.decode(enc)
+                except UnicodeDecodeError: continue
+            return output_bytes.decode('utf-8', errors='replace')
+
+        stdout_res = decode_output(stdout).strip()
+        stderr_res = decode_output(stderr).strip()
+
+        if process.returncode == 0:
             if not stdout_res:
                 return "执行成功，但没有任何输出（请确保代码内有 print 语句输出结果），且包含运行代码的主程序，如果没有请重写代码"
             return f"执行成功！输出：\n{stdout_res}"
         else:
             error_msg = stderr_res if stderr_res else stdout_res
-            return f"代码执行失败 (ReturnCode: {result.returncode})\n报错详情：\n{error_msg}"
+            return f"代码执行失败 (ReturnCode: {process.returncode})\n报错详情：\n{error_msg}"
 
-    except subprocess.TimeoutExpired:
-        return "错误：执行超时（20s）。"
     except Exception as e:
         # 这里会捕获到类似 'NoneType' 的报错并返回给 AI
         return f"系统异常：{str(e)}"
@@ -225,7 +241,7 @@ async def maid_evolution_loop(user_goal: str, chat_id: str = None):
                     if file_path not in created_skill_files:
                         created_skill_files.append(file_path)
             elif tool == "run_skill":
-                res = run_skill(args.get('name'))
+                res = await run_skill(args.get('name'))
             elif tool == "install_package":
                 pkg_name = args.get('pkg') or args.get('pkg_name')
                 logger.info(f"[Maid] 📦 正在安装依赖: {pkg_name}")
@@ -276,7 +292,7 @@ if __name__ == "__main__":
     async def main():
         try:
             # 2. 使用 await 调用异步的进化循环
-            target_task = "输出系统时间"
+            target_task = "请写一个明显阻塞程序运行的代码并运行，比如打开任务管理器，我要测试agent的阻塞保护功能。"
             result = await maid_evolution_loop(target_task)
 
             # 3. 此时 result 才是真正的字典结果
