@@ -1,7 +1,7 @@
 import gradio as gr
-import yaml
-import os
 from config import cfg, _ATTR_MAP, _SECTION_HEADERS
+import logging
+logger = logging.getLogger("main")
 
 def get_nested(data, path):
     d = data
@@ -12,126 +12,172 @@ def get_nested(data, path):
             return None
     return d
 
+
 def set_nested(data, path, value):
     d = data
     for k in path[:-1]:
-        if k not in d or not isinstance(d[k], dict):
-            d[k] = {}
+        if k not in d or not isinstance(d[k], dict): d[k] = {}
         d = d[k]
     d[path[-1]] = value
 
+
 def load_config():
-    # Force reload to get the latest from file
     cfg.reload()
     return cfg._raw
 
-def get_preset(preset_name):
-    if preset_name == "Momo（安静）":
-        return "Momo", "主人"
-    elif preset_name == "Yuki（活泼）":
-        return "Yuki", "哥哥大人"
-    return cfg.ROBOT_NAME, cfg.MASTER_NAME
+
+# ================= 核心：兼容深浅模式的拟物化 CSS =================
+# 不再强制写死白色/黑色，完全依赖原生主题变量，只做圆角和阴影的结构化塑形
+modern_css = """
+/* 隐藏底部不需要的 Footer */
+footer { display: none !important; }
+
+/* 强化折叠面板(Accordion)的卡片感 */
+.accordion { 
+    border-radius: 16px !important; 
+    box-shadow: 0 4px 6px -1px var(--shadow-color, rgba(0,0,0,0.05)) !important; 
+    border: 1px solid var(--border-color-primary) !important;
+    overflow: hidden;
+    margin-bottom: 12px !important;
+}
+
+/* 输入框圆角与焦点发光 */
+input[type="text"], input[type="password"], input[type="number"], textarea { 
+    border-radius: 10px !important; 
+    transition: all 0.2s ease !important; 
+}
+input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus { 
+    border-color: var(--color-accent) !important; 
+    box-shadow: 0 0 0 3px var(--color-accent-subtle) !important; 
+}
+
+/* 主按钮动效 */
+/* 主按钮：果冻粉渐变与动效 */
+button.primary { 
+    border-radius: 14px !important; 
+    font-weight: 600 !important; 
+    background: linear-gradient(135deg, var(--primary-400), var(--primary-600)) !important;
+    border: none !important;
+    color: white !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important; 
+}
+button.primary:hover { 
+    transform: translateY(-2px) !important; 
+    box-shadow: 0 6px 15px -3px var(--primary-500) !important;
+}
+button.primary:active { transform: scale(0.97) !important; }
+"""
+
 
 def build_ui():
     raw_config = load_config()
-    components = {}
+    components_map = {}
+    ordered_keys = []
 
-    with gr.Blocks(title="Yuki 配置面板") as demo:
-        gr.Markdown("## 🤖 智能体配置面板 (实时热重载)")
+    # 使用自带的柔和主题，完美支持右上角的 Dark Mode 切换
+    # 使用自带的柔和主题，完美支持右上角的 Dark Mode 切换
+    theme = gr.themes.Soft(
+        primary_hue="pink",  # 主色调：粉色
+        secondary_hue="rose",  # 次要色调：玫瑰粉
+        neutral_hue="stone",  # 中性底色：偏暖的石灰色（比冷灰色更搭粉色）
+        font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"]
+    )
 
+    with gr.Blocks(theme=theme, css=modern_css, title="Yuki Core Dashboard") as demo:
+        gr.Markdown(
+            """
+            # 🌸 Yuki Core Dashboard
+            <span style="color: var(--body-text-color-subdued); font-size: 0.95em;">
+            单页配置总览。修改后点击底部保存，主进程将自动完成热重载。
+            </span>
+            """
+        )
+
+        # ================= 基础身份区 =================
+        with gr.Accordion("Identity (基础身份)", open=True, elem_classes="accordion"):
+            with gr.Row():
+                rn = gr.Textbox(label="Robot Name (机器人自称)", value=raw_config.get("robot_name", "Yuki"), scale=1)
+                mn = gr.Textbox(label="Master Name (主人称呼)", value=raw_config.get("master_name", "主人"), scale=1)
+                components_map["robot_name"], components_map["master_name"] = rn, mn
+                ordered_keys.extend(["robot_name", "master_name"])
+
+            # ================= 瀑布流配置区 =================
+            for key, header in _SECTION_HEADERS.items():
+                # 先把属于这个 section 的配置项找出来
+                current_items = [(name, item) for name, item in _ATTR_MAP.items() if item[0][0] == key]
+
+                # 【关键修复】如果列表是空的（比如 robot_name 已经被我们在顶部处理了），直接跳过，不画空壳！
+                if not current_items:
+                    continue
+
+                section_name = header.replace("#", "").replace("=", "").strip()
+
+                with gr.Accordion(f"⚙️ {section_name}", open=True, elem_classes="accordion"):
+                    for i in range(0, len(current_items), 2):
+                        with gr.Row():
+                            for j in range(2):
+                                if i + j < len(current_items):
+                                    name, (path, default, comment) = current_items[i + j]
+                                    val = get_nested(raw_config, path)
+                                    if val is None: val = default
+
+                                    label = f"{name} {f'({comment})' if comment else ''}"
+
+                                    # 根据键名渲染组件
+                                    if "API_KEY" in name or "TOKEN" in name:
+                                        comp = gr.Textbox(label=label, value=val, type="password")
+                                    elif isinstance(default, bool):
+                                        comp = gr.Checkbox(label=label, value=val)
+                                    elif isinstance(default, int):
+                                        comp = gr.Number(label=label, value=val, precision=0)
+                                    elif isinstance(default, float):
+                                        comp = gr.Number(label=label, value=val)
+                                    else:
+                                        comp = gr.Textbox(label=label, value=str(val) if val is not None else "")
+
+                                    components_map[name] = comp
+                                    ordered_keys.append(name)
+
+        # ================= 操作区 =================
+        gr.HTML("<br>")
         with gr.Row():
-            btn_momo = gr.Button("🌸 切换为 Momo（安静）")
-            btn_yuki = gr.Button("❄️ 切换为 Yuki（活泼）")
-
-        with gr.Tab("核心人设"):
-            robot_name = gr.Textbox(label="机器人名字", value=raw_config.get("robot_name", "Yuki"))
-            master_name = gr.Textbox(label="主人称呼", value=raw_config.get("master_name", "主人"))
-            components["robot_name"] = robot_name
-            components["master_name"] = master_name
-
-        btn_momo.click(fn=lambda: get_preset("Momo（安静）"), outputs=[robot_name, master_name])
-        btn_yuki.click(fn=lambda: get_preset("Yuki（活泼）"), outputs=[robot_name, master_name])
-
-        sections = {}
-        for key, header in _SECTION_HEADERS.items():
-            section_name = header.strip("# = ")
-            with gr.Tab(section_name):
-                for name, (path, default, comment) in _ATTR_MAP.items():
-                    if path[0] == key:
-                        val = get_nested(raw_config, path)
-                        if val is None:
-                            val = default
-
-                        label = f"{name} ({comment})" if comment else name
-
-                        # Add specific annotations or password fields
-                        if name == "DIARY_IDLE_SECONDS":
-                            label += " (秒)"
-
-                        if name in ["LLM_API_KEY", "IMAGE_PROCESS_API_KEY"]:
-                            components[name] = gr.Textbox(label=label, value=val, type="password")
-                        elif isinstance(default, bool):
-                            components[name] = gr.Checkbox(label=label, value=val)
-                        elif isinstance(default, int):
-                            components[name] = gr.Number(label=label, value=val, precision=0)
-                        elif isinstance(default, float):
-                            components[name] = gr.Number(label=label, value=val)
-                        else:
-                            components[name] = gr.Textbox(label=label, value=str(val) if val is not None else "")
-
-        save_btn = gr.Button("💾 保存并热重载配置", variant="primary")
+            save_btn = gr.Button("💾 Apply Configuration (保存并热重载)", variant="primary", size="lg")
         status_text = gr.Markdown("")
 
-        def save_config_handler(robot, master, *args):
+        # ================= 后台处理逻辑 =================
+        def save_config_handler(*args):
             new_config = load_config()
-            new_config["robot_name"] = robot
-            new_config["master_name"] = master
+            input_data = dict(zip(ordered_keys, args))
 
-            idx = 0
-            # Validate API keys before saving
-            for name, (path, default, comment) in _ATTR_MAP.items():
-                if name in components and name not in ["robot_name", "master_name"]:
-                    val = args[idx]
+            new_config["robot_name"] = input_data.get("robot_name", "Yuki")
+            new_config["master_name"] = input_data.get("master_name", "主人")
 
-                    # Basic API Key validation
-                    if name == "LLM_API_KEY" and val:
-                        # Common LLM keys often start with sk- (like DeepSeek, OpenAI)
-                        if "dashscope.aliyuncs.com" not in new_config.get("api", {}).get("llm_base_url", "") and "sk-" not in val and len(val) > 10:
-                             if not val.startswith("sk-") and not val.startswith("Bearer"):
-                                 # We just do a weak check, but let's ensure it's not a URL
-                                 if val.startswith("http"):
-                                     return f"❌ 保存失败: LLM_API_KEY 格式似乎不正确 (看起来像是一个URL)。请检查是否填串位了。"
+            for name, (path, default, _) in _ATTR_MAP.items():
+                if name not in input_data: continue
+                val = input_data[name]
 
-                    if name == "IMAGE_PROCESS_API_KEY" and val:
-                        if val.startswith("http"):
-                            return f"❌ 保存失败: IMAGE_PROCESS_API_KEY 格式似乎不正确 (看起来像是一个URL)。请检查是否填串位了。"
+                if isinstance(default, list) and isinstance(val, str):
+                    clean_str = val.strip("[]").replace("'", "").replace("\"", "")
+                    val = [int(x.strip()) if x.strip().isdigit() else x.strip() for x in clean_str.split(",") if
+                           x.strip()]
+                elif isinstance(default, int):
+                    val = int(val)
+                elif isinstance(default, float):
+                    val = float(val)
 
-                    # Type conversion
-                    if isinstance(default, list):
-                        if isinstance(val, str):
-                            val = [x.strip() for x in val.strip("[]").replace("'", "").replace("\"", "").split(",") if x.strip()]
-                    elif isinstance(default, int):
-                        val = int(val)
-                    elif isinstance(default, float):
-                        val = float(val)
-
-                    set_nested(new_config, path, val)
-                    idx += 1
+                set_nested(new_config, path, val)
 
             cfg._raw = new_config
             cfg._save_raw()
-            return "✅ 配置已保存，主进程将自动检测并重载！"
+            return "### ✨ 写入成功！配置文件已更新，后台热重载已触发。"
 
-        # The inputs must match the order of *args processing
-        input_components = [components["robot_name"], components["master_name"]]
-        for name in _ATTR_MAP.keys():
-            if name in components and name not in ["robot_name", "master_name"]:
-                input_components.append(components[name])
-
+        input_components = [components_map[k] for k in ordered_keys]
         save_btn.click(fn=save_config_handler, inputs=input_components, outputs=[status_text])
 
     return demo
 
+
 if __name__ == "__main__":
     demo = build_ui()
-    demo.launch(server_name="0.0.0.0", server_port=1314)
+    # 局域网访问
+    demo.launch(server_name="127.0.0.1", server_port=1314)
