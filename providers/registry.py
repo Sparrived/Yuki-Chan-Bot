@@ -1,4 +1,6 @@
-from typing import Dict, Optional
+import importlib
+import pkgutil
+from typing import Dict, Optional, Tuple, Type
 
 from config import cfg
 from providers.base import BaseProvider
@@ -8,21 +10,15 @@ from utils.logger import get_logger
 
 logger = get_logger("provider.registry")
 
+# 平台名称 -> (Provider 类, 默认 base_url)
+_PROVIDER_REGISTRY: Dict[str, Tuple[Type[BaseProvider], str]] = {}
+
 
 def _get_provider_class_and_url(platform: str):
-    """根据平台名称返回 (Provider类, 默认base_url)。"""
+    """根据平台名称返回 (Provider 类, 默认 base_url)。"""
     p = (platform or "").lower().strip()
-    if p == "deepseek":
-        from providers.deepseek import DeepSeekProvider
-        return DeepSeekProvider, DeepSeekProvider.DEFAULT_BASE_URL
-    if p == "ytea":
-        from providers.ytea import YteaProvider
-        return YteaProvider, YteaProvider.DEFAULT_BASE_URL
-    if p in ("dashscope", "aliyun"):
-        from providers.dashscope import DashScopeProvider
-        return DashScopeProvider, DashScopeProvider.DEFAULT_BASE_URL
-    if p == "openai":
-        return OpenAICompatibleProvider, "https://api.openai.com/v1"
+    if p in _PROVIDER_REGISTRY:
+        return _PROVIDER_REGISTRY[p]
     # 未知平台回退到通用 OpenAI 兼容
     return OpenAICompatibleProvider, ""
 
@@ -35,13 +31,48 @@ class ProviderRegistry:
     """
 
     _instance = None
+    _discovered = False
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            if not cls._discovered:
+                cls._discover_providers()
+                cls._discovered = True
             cls._instance._providers: Dict[str, BaseProvider] = {}
             cls._instance._build_defaults()
         return cls._instance
+
+    @classmethod
+    def _discover_providers(cls):
+        """自动扫描 providers 包下的所有模块，读取 PLATFORM_NAME 完成注册。"""
+        import importlib
+        import inspect
+        import pkgutil
+        import providers
+
+        for _, modname, ispkg in pkgutil.iter_modules(providers.__path__):
+            if ispkg or modname in ("registry", "base"):
+                continue
+            try:
+                module = importlib.import_module(f"providers.{modname}")
+                for _, obj in inspect.getmembers(module, inspect.isclass):
+                    if (
+                        inspect.isclass(obj)
+                        and issubclass(obj, BaseProvider)
+                        and obj is not BaseProvider
+                        and hasattr(obj, "PLATFORM_NAME")
+                    ):
+                        name = getattr(obj, "PLATFORM_NAME")
+                        url = getattr(obj, "DEFAULT_BASE_URL", "")
+                        _PROVIDER_REGISTRY[name] = (obj, url)
+                        logger.debug(
+                            f"[ProviderRegistry] 自动注册平台: {name} -> {obj.__name__}"
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"[ProviderRegistry] 自动发现模块失败: {modname}: {e}"
+                )
 
     def _create_provider(
         self,

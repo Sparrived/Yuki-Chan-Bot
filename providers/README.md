@@ -123,20 +123,19 @@ class SiliconFlowProvider(OpenAICompatibleProvider):
         return payload
 ```
 
-### 步骤 2：注册到 ProviderRegistry
+### 步骤 2：约定注册
 
-修改 `providers/registry.py` 的 `_get_provider_class_and_url`：
+只要类满足以下条件，框架会自动发现并注册：
+- 继承自 `BaseProvider`（通常通过 `OpenAICompatibleProvider`）
+- 定义了 `PLATFORM_NAME` 类属性
 
 ```python
-def _get_provider_class_and_url(platform: str):
-    p = (platform or "").lower().strip()
-    if p == "deepseek":
-        ...
-    if p == "siliconflow":                # <-- 新增
-        from providers.siliconflow import SiliconFlowProvider
-        return SiliconFlowProvider, SiliconFlowProvider.DEFAULT_BASE_URL
-    ...
+class SiliconFlowProvider(OpenAICompatibleProvider):
+    PLATFORM_NAME = "siliconflow"
+    DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
 ```
+
+框架首次初始化 `ProviderRegistry` 时会**自动扫描** `providers/` 目录，读取所有符合条件的类并完成注册。**无需任何额外代码**。
 
 ### 步骤 3：使用
 
