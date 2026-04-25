@@ -284,6 +284,17 @@ def build_ui():
 
                 set_nested(new_config, path, val)
 
+            # 非 custom 平台自动清空对应的 base_url，避免旧 URL 干扰新平台
+            _PLATFORM_URL_MAP = {
+                "LLM_PLATFORM": ("LLM_BASE_URL", ("api", "llm_base_url")),
+                "BACKUP_PLATFORM": ("BACKUP_BASE_URL", ("api", "backup_base_url")),
+                "VISION_PLATFORM": ("IMAGE_PROCESS_API_URL", ("api", "image_process_url")),
+            }
+            for plat_key, (url_key, url_path) in _PLATFORM_URL_MAP.items():
+                plat_val = input_data.get(plat_key, "")
+                if plat_val != "custom":
+                    set_nested(new_config, url_path, "")
+
             cfg._raw = new_config
             cfg._save_raw()
             return "### ✨ 写入成功！配置文件已更新，后台热重载已触发。"

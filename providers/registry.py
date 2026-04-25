@@ -83,9 +83,13 @@ class ProviderRegistry:
         default_model: Optional[str] = None,
         timeout: float = 60.0,
     ):
-        """工厂方法：根据平台名称创建对应 Provider，支持 URL 覆盖。"""
+        """工厂方法：根据平台名称创建对应 Provider，支持 URL 覆盖。
+        注意：只有 platform 为 'custom' 时才使用 override_url，
+        否则强制使用内置 URL，避免旧配置中的 URL 干扰新平台。
+        """
         provider_cls, builtin_url = _get_provider_class_and_url(platform)
-        base_url = override_url or builtin_url
+        # 非 custom 平台强制使用内置 URL；custom 平台优先使用覆盖 URL
+        base_url = (override_url or builtin_url) if platform == "custom" else builtin_url
         return provider_cls(
             name=name,
             base_url=base_url,
