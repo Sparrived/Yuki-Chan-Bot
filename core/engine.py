@@ -17,14 +17,18 @@ logger = get_logger("engine")
 
 class YukiEngine:
     def __init__(self, rag, history_manager, yuki_state, sender):
-        from providers.registry import ProviderRegistry
-        self.provider = ProviderRegistry().get("default")
         self.rag = rag
         self.history = history_manager
         self.yuki = yuki_state
         self.sender = sender
         self.maid = None  # 后面再赋值
         self.process_callback = None  # 预留回调接口
+
+    @property
+    def provider(self):
+        """每次访问时从 ProviderRegistry 获取最新实例，确保热重载后生效。"""
+        from providers.registry import ProviderRegistry
+        return ProviderRegistry().get("default")
 
     async def api_reply(self, chat_id: str, combined_text: str, history_dict: dict, mode, relevant_diaries: list[Any]) -> str:
         # 总构建发送Deepseek补全的信息
