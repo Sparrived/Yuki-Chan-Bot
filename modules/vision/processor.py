@@ -85,7 +85,7 @@ class MemeProcessor:
             )
 
         # 兼容降级：直接走原始 HTTP 请求
-        logger.debug(f"token:{cfg.IMAGE_PROCESS_API_KEY}, url:{cfg.IMAGE_PROCESS_API_URL}")
+        logger.debug(f"url:{cfg.IMAGE_PROCESS_API_URL}")
         headers = {
             "Authorization": f"Bearer {cfg.IMAGE_PROCESS_API_KEY}",
             "Content-Type": "application/json"

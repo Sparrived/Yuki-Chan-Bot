@@ -227,8 +227,14 @@ class Config:
                         changed.append((name, old_val, new_val))
                 if changed:
                     logger.info("[Config] 检测到配置变更，已自动重载：")
+                    _SENSITIVE_KEYS = {"LLM_API_KEY", "BACKUP_API_KEY", "IMAGE_PROCESS_API_KEY", "NAPCAT_WS_TOKEN"}
                     for name, old_val, new_val in changed:
-                        logger.info(f"  {name}: {old_val!r} → {new_val!r}")
+                        if name in _SENSITIVE_KEYS:
+                            old_disp = "***" if old_val else "(空)"
+                            new_disp = "***" if new_val else "(空)"
+                            logger.info(f"  {name}: {old_disp} → {new_disp}")
+                        else:
+                            logger.info(f"  {name}: {old_val!r} → {new_val!r}")
 
                     # 若平台/API/模型配置发生变更，通知 ProviderRegistry 重新构建
                     platform_related = {
