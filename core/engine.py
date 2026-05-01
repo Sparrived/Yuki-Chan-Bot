@@ -34,7 +34,8 @@ class YukiEngine:
         from providers.registry import ProviderRegistry
         return ProviderRegistry().get("default")
 
-    async def api_reply(self, chat_id: str, combined_text: str, history_dict: dict, mode, relevant_diaries: list[Any]) -> str:
+    async def api_reply(self, chat_id: str, combined_text: str, history_dict: dict, mode,
+                        relevant_diaries: list[Any]) -> str:
         # 总构建发送Deepseek补全的信息
         combined_API_message = await build_chat_context(self.yuki,
                                                         chat_id,
