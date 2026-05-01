@@ -14,7 +14,6 @@ from modules.message.CQParser import CQCodeParser
 from modules.vision.processor import MemeProcessor
 from network.ws_connection import BotConnector
 from network.ws_sender import MessageSender
-from network.api_request import ApiCall
 from config import cfg
 from webui import build_ui
 import os
@@ -57,15 +56,30 @@ async def main_process(chat_id, mode, debounce_flag=True, force_reply=None):
     first_time = time.time()
     await yuki.boost_activity(chat_id)
     # 视觉理解总处理
-    # 提取所有文本用于视觉处理和后续拼合
     all_contents = [m["content"] for m in message_objs]
     combined_text = "\n".join(all_contents)
-    modified_text, image_urls = meme_processor.extract_urls_from_text(combined_text)
-    if image_urls:
+
+    # 接收返回的 modified_text 和 字典列表 images_info
+    modified_text, images_info = meme_processor.extract_urls_from_text(combined_text)
+
+    if images_info:
         understood_contents = []
-        for url in image_urls:
+        for img in images_info:
+            url = img["url"]
+            is_meme = img["is_meme"]
+
+            # 1. 看图权限：无论是不是表情包，都让视觉模型（VLM）看一眼并理解
             result = await meme_processor.understand_from_url(url, llm)
             understood_contents.append(result)
+
+            # 2. 存图权限：【核心防线】只有确认为表情包 (is_meme 为 True)，才允许后台偷图入库！
+            if is_meme and hasattr(engine, 'sticker_manager'):
+                clean_url = url.replace("&amp;", "&")  # 清洗 URL 防 400 报错
+                # asyncio.create_task(
+                #     engine.sticker_manager.ingest_sticker(image_ref=clean_url, chat_id=chat_id, owner="群友")
+                # )
+            elif not is_meme:
+                logger.info("[System] 拦截到非表情包图片，仅作视觉理解，不入库学习。")
 
         combined_text = modified_text
         for content in understood_contents:
@@ -114,21 +128,38 @@ async def main_process(chat_id, mode, debounce_flag=True, force_reply=None):
 
     logger.info(f"检索完成，用时 {(time.time()-first_time):.2f}")
 
-    Yuki_Answer,voice = await engine.api_reply(chat_id, combined_text, history_dict, mode, relevant_diaries)
+    Yuki_answer_raw, Yuki_Answer, voice = await engine.api_reply(chat_id, combined_text, history_dict, mode, relevant_diaries)
 
     logger.info(f"{cfg.ROBOT_NAME.title()}打字完成！")
     if mode == "group":
         yuki.consume_energy(chat_id)
     logger.info(f"[System] {cfg.ROBOT_NAME.title()} 正在发送消息...(剩余精力: {yuki.energy[chat_id]:.1f})")
-    if not voice: await sender.send(chat_id, Yuki_Answer, mode=mode)
-    else: await sender.send(chat_id, voice, mode=mode)
-    logger.info(f"[System] 发送完成！内容：{Yuki_Answer}")
+
+    if not voice:
+        # 使用正则拆分文本和表情包，() 会将匹配到的 CQ 码也保留在列表中
+        parts = re.split(r'(\[CQ:image,[^\]]*?sub_type=1\])', Yuki_Answer, flags=re.IGNORECASE)
+
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+
+            # 依次发送拆分出来的文字块和表情包
+            await sender.send(chat_id, part, mode=mode)
+
+            # 增加一个微小的延迟，模拟人类“发完字再点表情包”的节奏感
+            await asyncio.sleep(1.0)
+
+    else:
+        await sender.send(chat_id, voice, mode=mode)
+
+    logger.info(f"[System] 发送完成！全量内容：{Yuki_Answer}")
     logger.info(f"[System] {cfg.ROBOT_NAME.title()}正在保存上下文...")
     # 保存回复到上下文
     history_manager.append_to_log(chat_id, cfg.ROBOT_NAME.title(), Yuki_Answer)
     history_dict[chat_id].append({
         "role": "assistant", 
-        "content": Yuki_Answer,
+        "content": Yuki_answer_raw,
         "time": current_time_str  # 新增独立字段
     })
     history_manager.save(history_dict)
@@ -198,7 +229,19 @@ async def napcat_listen(mode):
 async def manage_buffer(chat_id, content, mode, raw_message='', sender_name = '',user_id = None):
     global real_time_debounce_time
     cid_str = str(chat_id)
-
+    # === 新增：捕捉群友正反馈（RLHF） ===
+    # 如果Yuki刚发了表情包，且这句话是群友发的
+    # 判定是否为机器人（可以根据名称含 BOT，或者特定的 QQ 号判定）
+    is_bot = "BOT" in sender_name or "机器人" in sender_name
+    if cid_str in yuki.last_sent_meme and not is_bot:
+        # 定义正反馈触发词
+        feedback_words = ["哈", "草", "233", "笑", "蚌埠", "确实", "典", "好图", "偷了"]
+        # 如果消息包含触发词，或者群友紧接着也发了一张图（斗图）
+        if any(fw in raw_message for fw in feedback_words) or "[CQ:image" in raw_message:
+            meme_id = yuki.last_sent_meme.pop(cid_str)  # 弹出记录，防止一张图被无限加分
+            if hasattr(engine, 'sticker_manager'):
+                engine.sticker_manager.add_preference(meme_id)
+    # ==================================
     # --- 新增：只要收到消息，就重置该群的破冰失败计数 ---
     if cid_str in yuki.ice_break_fail_count:
         if yuki.ice_break_fail_count[cid_str] > 0:
@@ -242,6 +285,35 @@ async def manage_buffer(chat_id, content, mode, raw_message='', sender_name = ''
     yuki.buffer_tasks[chat_id] = asyncio.create_task(main_process(chat_id, mode))
 
 if __name__ == "__main__":
+    import os
+    import atexit
+    os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
+
+    _cleanup_done = False
+
+    def _do_cleanup():
+        """同步清理资源：关闭 ProviderRegistry 释放 aiohttp Session"""
+        global _cleanup_done
+        if _cleanup_done:
+            return
+        _cleanup_done = True
+        logger.info("[System] 正在清理资源...")
+        try:
+            cfg._save_raw()
+            logger.info("[System] 配置已自动对齐保存")
+        except Exception as e:
+            logger.error(f"[System] 保存配置时出错: {e}")
+        try:
+            from providers.registry import ProviderRegistry
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(ProviderRegistry().close_all())
+            loop.close()
+            logger.info("[System] 资源清理完成")
+        except Exception as e:
+            logger.error(f"[System] 清理资源时出错: {e}")
+
+    atexit.register(_do_cleanup)
+
     try:
         logger.info("[System] 请确保已运行setup.py进行初始化配置！")
         logger.info(f"[System] {cfg.ROBOT_NAME.title()} 正在初始化...")
@@ -253,12 +325,16 @@ if __name__ == "__main__":
         sender = MessageSender(connector)
         # 实例化CQ码处理器
         parser = CQCodeParser(connector)
+        
         # 实例化表情处理器
         meme_processor = MemeProcessor()
         # 实例化Yuki状态
         yuki = YukiState()
         # 实例化LLM请求器
         llm = ApiCall(cfg.LLM_API_KEY, cfg.LLM_BASE_URL)
+        from modules.stickers.manager import StickerManager
+
+        sticker_manager = StickerManager(llm)
         # 实例化历史记录管理器
         history_manager = HistoryManager()
         logger.info("[System] 开始初始化记忆系统（RAG）...")
@@ -266,9 +342,10 @@ if __name__ == "__main__":
 
         # 初始化向量记忆库
         memory_rag = MemoryRAG()
-        # 实例化Yuki主引擎
-        engine = YukiEngine(llm, memory_rag, history_manager, yuki, sender)
+        # 实例化Yuki主引擎（内部自动从 ProviderRegistry 获取 default provider）
+        engine = YukiEngine(memory_rag, history_manager, yuki, sender)
         engine.process_callback = main_process
+        engine.sticker_manager = sticker_manager
         # 在 engine = YukiEngine(...) 之后
         success = False
         try:
@@ -276,7 +353,10 @@ if __name__ == "__main__":
             webui.launch(
                 server_name="127.0.0.1",
                 server_port=1314,
-                prevent_thread_lock=True
+                prevent_thread_lock=True,
+                quiet=True,
+                theme=webui._ui_theme,
+                css=webui._ui_css
             )
             success = True
         except Exception as e:
@@ -298,6 +378,10 @@ if __name__ == "__main__":
             logger.debug(f"已预载 {len(yuki.last_message_time)} 个群组到巡检名单")
         asyncio.run(napcat_listen("private" if choice == "1" else "group"))
 
+    except KeyboardInterrupt:
+        logger.info("[System] 收到中断信号，正在退出...")
+        sys.exit(0)
+
     except (FileNotFoundError, ImportError, KeyError) as e:
         logger.error("=" * 50)
         logger.error("启动失败：环境配置似乎不完整")
@@ -313,3 +397,6 @@ if __name__ == "__main__":
         logger.critical(f"发生未知致命错误: {e}")
         # 这里可以选择记录日志
         sys.exit(1)
+
+    finally:
+        _do_cleanup()
