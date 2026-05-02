@@ -319,17 +319,23 @@ def config_yaml(mode):
     for label, plat_path, key_path, model_path, model_default, key_prompt, url_path in platform_configs:
         current_plat = _get_nested(cfg, plat_path) or ""
         print(f"\n当前{label}平台: {current_plat or '未设置'}")
-        plat_input = input(f"请选择{label}平台 [deepseek/dashscope/openai/ytea/自定义URL] (回车保持当前): ").strip()
+
+        plat_input = input(f"请选择{label}平台 [deepseek/dashscope/openai/ytea] (回车保持当前): ").strip()
         if plat_input:
-            if plat_input.startswith("http"):
-                # 用户输入了完整 URL，作为自定义平台
-                set_nested(cfg, url_path, plat_input)
-                set_nested(cfg, plat_path, "openai")
-                print(f"  ✓ {'.'.join(plat_path)} 已设置为 openai (自定义URL)")
-            else:
-                set_nested(cfg, plat_path, plat_input)
+            set_nested(cfg, plat_path, plat_input)
+            changed = True
+            print(f"  ✓ {'.'.join(plat_path)} 已设置为 {plat_input}")
+
+        # 2. 独立询问：代理 URL (决定发往哪个服务器)
+        current_url = _get_nested(cfg, url_path) or ""
+        url_input = input(f"请输入代理 URL (回车保持 [{current_url}], 输入 'clear' 清空使用官方地址): ").strip()
+        if url_input:
+            if url_input.lower() == "clear":
                 set_nested(cfg, url_path, "")
-                print(f"  ✓ {'.'.join(plat_path)} 已设置为 {plat_input}")
+                print(f"  ✓ {'.'.join(url_path)} 已清空，将使用平台官方默认地址")
+            else:
+                set_nested(cfg, url_path, url_input)
+                print(f"  ✓ {'.'.join(url_path)} 已设置为 {url_input}")
             changed = True
 
         val = input(key_prompt).strip()

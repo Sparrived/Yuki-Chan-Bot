@@ -69,7 +69,7 @@ async def main_process(chat_id, mode, debounce_flag=True, force_reply=None):
             is_meme = img["is_meme"]
 
             # 1. 看图权限：无论是不是表情包，都让视觉模型（VLM）看一眼并理解
-            result = await meme_processor.understand_from_url(url, llm)
+            result = await meme_processor.understand_from_url(url)
             understood_contents.append(result)
 
             # 2. 存图权限：【核心防线】只有确认为表情包 (is_meme 为 True)，才允许后台偷图入库！
@@ -331,10 +331,10 @@ if __name__ == "__main__":
         # 实例化Yuki状态
         yuki = YukiState()
         # 实例化LLM请求器
-        llm = ApiCall(cfg.LLM_API_KEY, cfg.LLM_BASE_URL)
+        # llm = ApiCall(cfg.LLM_API_KEY, cfg.LLM_BASE_URL)
         from modules.stickers.manager import StickerManager
 
-        sticker_manager = StickerManager(llm)
+        sticker_manager = StickerManager()
         # 实例化历史记录管理器
         history_manager = HistoryManager()
         logger.info("[System] 开始初始化记忆系统（RAG）...")
