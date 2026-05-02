@@ -470,14 +470,12 @@ class StickerManager:
 # ====================== 数据库管理终端 ======================
 
 if __name__ == "__main__":
-    import sys
-    from pathlib import Path
 
 
     async def view_sticker_database():
         # 1. 初始化（自动读取 cfg 路径）
-        dummy_llm = ApiCall(cfg.LLM_API_KEY, cfg.LLM_BASE_URL)
-        manager = StickerManager(dummy_llm)
+        # dummy_llm = ApiCall(cfg.LLM_API_KEY, cfg.LLM_BASE_URL)
+        manager = StickerManager()
 
         while True:  # 增加循环，删完图后自动刷新列表
             print(f"\n{'=' * 20} 📦 Yuki 表情包军火库全量审计 {'=' * 20}")

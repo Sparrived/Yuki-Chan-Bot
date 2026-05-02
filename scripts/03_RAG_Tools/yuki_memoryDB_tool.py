@@ -13,8 +13,8 @@ import config as cfg
 
 class MemoryAuditor:
     def __init__(self):
-        self.api_key = os.getenv("TEATOP_API_KEY", "").strip()
-        self.api_url = "https://api.ytea.top/v1/chat/completions"
+        self.api_key = "xxxxxxxxx"
+        self.api_url = "https://api.deepseek.com/chat/completions"
         self.model = "deepseek-chat"  # 沿用你测试效果最好的模型
 
     async def ask_yuki_to_choose(self, doc_a, doc_b, retries=3):
@@ -99,12 +99,23 @@ async def smart_semantic_deduplication(rag, chat_id, threshold=0.88):
         return
 
     sim_matrix = cosine_similarity(vectors)
-    to_delete_ids = []
+    deleted_count = 0
+    active_ids = set(ids)  # 维护一个当前依然存在的 ID 集合
 
-    for i in range(len(docs)):
-        if ids[i] in to_delete_ids: continue
-        for j in range(i + 1, len(docs)):
-            if ids[j] in to_delete_ids: continue
+    try:
+        # 在 sim_matrix = cosine_similarity(vectors) 这一行下面添加：
+        if len(sim_matrix) > 1:
+            # 排除掉对角线上的 1.0（自己和自己比），找最大的那个值
+            max_sim = np.max(sim_matrix - np.eye(len(sim_matrix)))
+            print(f"📊 当前库内最大相似度为: {max_sim:.4f}")
+        for i in range(len(docs)):
+            if i % 100 == 0:  # 每处理100条打印一次进度，让你知道它没死掉
+                print(f"⏳ 已扫描 {i}/{len(docs)} 条记录...")
+
+            if ids[i] not in active_ids: continue
+
+            for j in range(i + 1, len(docs)):
+                if ids[j] not in active_ids: continue
 
                 # 只有相似度达标才打扰 AI
                 if sim_matrix[i][j] > threshold:

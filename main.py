@@ -6,8 +6,6 @@ import time
 import datetime
 import sys
 
-from sympy import true
-
 from core.brain import YukiState
 from core.engine import YukiEngine
 from core.history_manager import HistoryManager
@@ -71,7 +69,7 @@ async def main_process(chat_id, mode, debounce_flag=True, force_reply=None):
             is_meme = img["is_meme"]
 
             # 1. 看图权限：无论是不是表情包，都让视觉模型（VLM）看一眼并理解
-            result = await meme_processor.understand_from_url(url, llm)
+            result = await meme_processor.understand_from_url(url)
             understood_contents.append(result)
 
             # 2. 存图权限：【核心防线】只有确认为表情包 (is_meme 为 True)，才允许后台偷图入库！
@@ -267,10 +265,13 @@ async def manage_buffer(chat_id, content, mode, raw_message='', sender_name = ''
         return 
     # 入队
 
+    # 判定是否为机器人（可以根据名称含 BOT，或者特定的 QQ 号判定）
+    is_bot = "BOT" in sender_name or "机器人" in sender_name
+    
 
     if chat_id not in yuki.message_buffer:
         yuki.message_buffer[chat_id] = []
-    if (not ("BOT" in sender_name)):
+    if (not ("BOT" in sender_name)) or (user_id and user_id == 1390249127):  # 允许特定机器人QQ发起对话
         yuki.message_buffer[chat_id].append({
             "name": sender_name,
             "content": content,  # 这是带 【“姓名”】说: 的完整格式
@@ -330,14 +331,15 @@ if __name__ == "__main__":
         # 实例化Yuki状态
         yuki = YukiState()
         # 实例化LLM请求器
-        llm = ApiCall(cfg.LLM_API_KEY, cfg.LLM_BASE_URL)
+        # llm = ApiCall(cfg.LLM_API_KEY, cfg.LLM_BASE_URL)
         from modules.stickers.manager import StickerManager
 
-        sticker_manager = StickerManager(llm)
+        sticker_manager = StickerManager()
         # 实例化历史记录管理器
         history_manager = HistoryManager()
         logger.info("[System] 开始初始化记忆系统（RAG）...")
         from modules.memory.rag import MemoryRAG
+
         # 初始化向量记忆库
         memory_rag = MemoryRAG()
         # 实例化Yuki主引擎（内部自动从 ProviderRegistry 获取 default provider）
